@@ -1,0 +1,40 @@
+---
+// Tiny scroll accent (no framework).
+// Enhances visuals only; content remains fully static for SEO/accessibility.
+---
+
+<div aria-hidden="true" class="pointer-events-none fixed left-0 right-0 top-0 z-50 h-[3px] bg-white/10">
+	<div id="scroll-accent-bar" class="h-full w-[0%] bg-gradient-to-r from-transparent via-white/70 to-transparent"></div>
+</div>
+
+<script>
+	(() => {
+		const reduceMotion =
+			window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+		if (reduceMotion) return;
+
+		const bar = document.getElementById('scroll-accent-bar');
+		if (!bar) return;
+
+		let raf = 0;
+		const clamp01 = (v) => Math.min(1, Math.max(0, v));
+
+		const update = () => {
+			raf = 0;
+			const doc = document.documentElement;
+			const max = Math.max(1, doc.scrollHeight - window.innerHeight);
+			const p = clamp01(window.scrollY / max);
+			bar.style.width = `${Math.round(p * 1000) / 10}%`;
+		};
+
+		const onScroll = () => {
+			if (raf) return;
+			raf = requestAnimationFrame(update);
+		};
+
+		update();
+		window.addEventListener('scroll', onScroll, { passive: true });
+		window.addEventListener('resize', onScroll);
+	})();
+</script>
+

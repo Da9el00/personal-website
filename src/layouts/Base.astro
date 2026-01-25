@@ -1,0 +1,70 @@
+---
+import '../styles/global.css';
+
+type Props = {
+	title: string;
+	description: string;
+};
+
+const { title, description } = Astro.props;
+
+const siteUrl = Astro.site ?? new URL(Astro.url.origin);
+const canonical = new URL(Astro.url.pathname, siteUrl).toString();
+
+const ogImageUrl = new URL('/og.svg', siteUrl).toString();
+
+const personSchema = {
+	'@context': 'https://schema.org',
+	'@type': 'Person',
+	name: 'Daniel Smidstrup',
+	jobTitle: 'Co-founder & CTO',
+	url: new URL('/', siteUrl).toString(),
+	sameAs: ['https://www.linkedin.com/in/daniel-smidstrup-b98390226/', 'https://userlink.ai/'],
+	worksFor: {
+		'@type': 'Organization',
+		name: 'Userlink',
+		url: 'https://userlink.ai/',
+	},
+};
+---
+
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="generator" content={Astro.generator} />
+
+		<title>{title}</title>
+		<meta name="description" content={description} />
+		<link rel="canonical" href={canonical} />
+
+		<meta property="og:type" content="website" />
+		<meta property="og:title" content={title} />
+		<meta property="og:description" content={description} />
+		<meta property="og:url" content={canonical} />
+		<meta property="og:image" content={ogImageUrl} />
+
+		<meta name="twitter:card" content="summary_large_image" />
+		<meta name="twitter:title" content={title} />
+		<meta name="twitter:description" content={description} />
+		<meta name="twitter:image" content={ogImageUrl} />
+
+		<link rel="preload" as="image" href="/headshot.png" />
+		<link rel="preload" as="image" href="/brain.png" />
+
+		<link rel="icon" href="/favicon.ico" sizes="any" />
+		<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+		<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+		<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+		<link rel="manifest" href="/site.webmanifest" />
+
+		<script type="application/ld+json">{JSON.stringify(personSchema)}</script>
+	</head>
+	<body class="bg-transparent">
+		<main class="w-full">
+			<slot />
+		</main>
+	</body>
+</html>
+

@@ -1,0 +1,1485 @@
+---
+type Step = {
+	title: string;
+	body: string; // kept for SEO fallback + meta
+};
+
+const steps: Step[] = [
+	{
+		title: 'Daniel',
+		body: 'A scrollable snapshot of me — trying a new perspective on a personal webpage.',
+	},
+	{
+		title: 'Software',
+		body: 'I like building software that feels sharp: simple architecture, strong UX, and fast feedback.',
+	},
+	{
+		title: 'Masters',
+		body: 'Formal training helped, but I mostly learned by building, shipping, and measuring.',
+	},
+	{
+		title: 'Human-AI collaboration',
+		body: 'I care about collaboration: humans set direction and taste; AI provides leverage and speed.',
+	},
+	{
+		title: 'Startups',
+		body: 'Startups are my lab: constraints, iteration, and learning under time pressure.',
+	},
+	{
+		title: 'Lessons',
+		body: 'The meta-skill is clarity: define the problem, pick the levers, remove noise.',
+	},
+	{
+		title: 'Problems',
+		body: 'I’m fascinated by problems: behavior, systems, incentives, and data.',
+	},
+	{
+		title: 'Userlink',
+		body: 'At Userlink we build AI-native workflows that turn interest into action.',
+	},
+	{
+		title: 'CTO',
+		body: 'As CTO I design teams and systems: interfaces, ownership, and operational calm.',
+	},
+	{
+		title: 'Next',
+		body: 'Want to see what we’re building? Check out Userlink — or DM me on LinkedIn.',
+	},
+];
+
+type Node = {
+	id: string;
+	label: string;
+	kind?: 'primary' | 'secondary';
+	href?: string;
+	tone?: 'linkedin' | 'meaning' | 'ai' | 'growth' | 'ops';
+	// Spherical coordinates (degrees) for pseudo-3D orbit.
+	theta: number; // 0..360 (around)
+	phi: number; // 0..180 (top->bottom)
+};
+
+const nodes: Node[] = [
+	{
+		id: 'daniel',
+		label: 'Daniel',
+		kind: 'primary',
+		theta: 210,
+		phi: 80,
+	},
+	{ id: 'software', label: 'Software', theta: 250, phi: 70 },
+	{ id: 'masters', label: 'Masters', theta: 280, phi: 62 },
+	{
+		id: 'userlink',
+		label: 'Userlink',
+		kind: 'primary',
+		href: 'https://userlink.ai/',
+		theta: 20,
+		phi: 78,
+	},
+	{ id: 'cto', label: 'CTO', theta: 46, phi: 86 },
+	{ id: 'scaling', label: 'Scaling', theta: 72, phi: 96, tone: 'ops' },
+	{
+		id: 'linkedin',
+		label: 'LinkedIn',
+		kind: 'primary',
+		href: 'https://www.linkedin.com/in/daniel-smidstrup-b98390226/',
+		tone: 'linkedin',
+		theta: 320,
+		phi: 70,
+	},
+	{ id: 'writing', label: 'Writing', theta: 335, phi: 86, tone: 'linkedin' },
+	{ id: 'network', label: 'Network', theta: 350, phi: 98, tone: 'linkedin' },
+	{ id: 'distribution', label: 'Distribution', theta: 10, phi: 102, tone: 'linkedin' },
+	{ id: 'hustle', label: 'Hustle', theta: 300, phi: 38 },
+	{ id: 'startup', label: 'Startup', theta: 340, phi: 44 },
+	{ id: 'meaning', label: 'Meaning', theta: 240, phi: 120, tone: 'meaning' },
+	{ id: 'lessons', label: 'Lessons', theta: 210, phi: 130 },
+	{ id: 'problems', label: 'Problems', theta: 190, phi: 110 },
+	{ id: 'experiments', label: 'Experiments', theta: 190, phi: 132, tone: 'ai' },
+	{ id: 'growth', label: 'Growth', theta: 35, phi: 46, tone: 'growth' },
+	{ id: 'management', label: 'Management', theta: 140, phi: 92, tone: 'ops' },
+	{ id: 'organization', label: 'Organization', theta: 80, phi: 112, tone: 'ops' },
+	{ id: 'ai', label: 'AI', theta: 20, phi: 140, tone: 'ai' },
+	{ id: 'math', label: 'Math', theta: 0, phi: 156, tone: 'ai' },
+	{ id: 'llms', label: 'LLMs', theta: 18, phi: 122, tone: 'ai' },
+	{ id: 'agents', label: 'Agents', theta: 34, phi: 132, tone: 'ai' },
+	{ id: 'tools', label: 'Tools', theta: 56, phi: 138, tone: 'ai' },
+	{ id: 'chatbots', label: 'Chatbots', theta: 78, phi: 130, tone: 'ai' },
+	{ id: 'human_ai', label: 'Human–AI', theta: 110, phi: 52 },
+	{ id: 'data_analysis', label: 'Data analysis', theta: 60, phi: 64, tone: 'ai' },
+];
+
+type Edge = { from: string; to: string; strength?: 'strong' | 'soft' };
+const edges: Edge[] = [
+	{ from: 'daniel', to: 'userlink', strength: 'strong' },
+	{ from: 'daniel', to: 'software', strength: 'soft' },
+	{ from: 'software', to: 'masters', strength: 'soft' },
+	{ from: 'masters', to: 'human_ai', strength: 'soft' },
+	{ from: 'daniel', to: 'hustle', strength: 'soft' },
+	{ from: 'daniel', to: 'startup', strength: 'soft' },
+	{ from: 'daniel', to: 'meaning', strength: 'soft' },
+	{ from: 'daniel', to: 'ai', strength: 'soft' },
+	{ from: 'daniel', to: 'management', strength: 'soft' },
+	{ from: 'daniel', to: 'linkedin', strength: 'soft' },
+	// LinkedIn track (separate path)
+	{ from: 'linkedin', to: 'writing', strength: 'soft' },
+	{ from: 'writing', to: 'network', strength: 'soft' },
+	{ from: 'network', to: 'distribution', strength: 'soft' },
+	{ from: 'distribution', to: 'growth', strength: 'soft' },
+	{ from: 'distribution', to: 'userlink', strength: 'soft' },
+	{ from: 'startup', to: 'hustle', strength: 'soft' },
+	{ from: 'meaning', to: 'experiments', strength: 'soft' },
+	{ from: 'startup', to: 'lessons', strength: 'soft' },
+	{ from: 'lessons', to: 'problems', strength: 'soft' },
+	{ from: 'problems', to: 'data_analysis', strength: 'soft' },
+	{ from: 'userlink', to: 'growth', strength: 'soft' },
+	{ from: 'userlink', to: 'organization', strength: 'soft' },
+	{ from: 'userlink', to: 'cto', strength: 'soft' },
+	{ from: 'cto', to: 'scaling', strength: 'soft' },
+	{ from: 'scaling', to: 'management', strength: 'soft' },
+	{ from: 'management', to: 'organization', strength: 'soft' },
+	{ from: 'ai', to: 'math', strength: 'soft' },
+	{ from: 'ai', to: 'experiments', strength: 'soft' },
+	// LLM / agent world (branch)
+	{ from: 'ai', to: 'llms', strength: 'soft' },
+	{ from: 'llms', to: 'agents', strength: 'soft' },
+	{ from: 'agents', to: 'tools', strength: 'soft' },
+	{ from: 'agents', to: 'chatbots', strength: 'soft' },
+	{ from: 'tools', to: 'experiments', strength: 'soft' },
+	{ from: 'chatbots', to: 'human_ai', strength: 'soft' },
+	{ from: 'linkedin', to: 'userlink', strength: 'soft' },
+	{ from: 'human_ai', to: 'ai', strength: 'soft' },
+	{ from: 'human_ai', to: 'management', strength: 'soft' },
+	{ from: 'data_analysis', to: 'math', strength: 'soft' },
+	{ from: 'data_analysis', to: 'growth', strength: 'soft' },
+	{ from: 'data_analysis', to: 'organization', strength: 'soft' },
+];
+---
+
+<section
+	id="brainmap"
+	class="relative mt-0 left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen"
+	data-step-count={steps.length}
+	aria-label="Daniel’s brain map"
+>
+	<style>
+		#brainmap-stage {
+			position: absolute;
+			inset: 0;
+		}
+
+		/* Minimal “smart” labels: only shown for focus + neighbors. */
+		[data-node][data-show-label='1']::after,
+		[data-node]:hover::after {
+			content: attr(data-label);
+			position: absolute;
+			left: 50%;
+			top: -10px;
+			transform: translate(-50%, -100%);
+			padding: 6px 10px;
+			border-radius: 9999px;
+			border: 1px solid rgba(255, 255, 255, 0.12);
+			background: rgba(0, 0, 0, 0.55);
+			backdrop-filter: blur(10px);
+			-webkit-backdrop-filter: blur(10px);
+			color: rgba(255, 255, 255, 0.86);
+			font-size: 12px;
+			line-height: 1;
+			letter-spacing: 0.02em;
+			white-space: nowrap;
+			pointer-events: none;
+		}
+
+		/* Hover glow centered on the dot (so it never looks “offset”). */
+		[data-node] {
+			cursor: pointer !important;
+			--node-glow: rgba(255, 255, 255, 0.22);
+			--node-hover-border: rgba(255, 255, 255, 0.45);
+			--node-hover-bg: rgba(255, 255, 255, 0.30);
+			--node-hover-glow: rgba(255, 255, 255, 0.12);
+		}
+
+		/* Subtle topic tints */
+		[data-node][data-tone='linkedin'] {
+			--node-glow: rgba(140, 205, 255, 0.22);
+			--node-hover-border: rgba(140, 205, 255, 0.55);
+			--node-hover-bg: rgba(140, 205, 255, 0.18);
+			--node-hover-glow: rgba(140, 205, 255, 0.14);
+		}
+		[data-node][data-tone='meaning'] {
+			--node-glow: rgba(197, 160, 255, 0.22);
+			--node-hover-border: rgba(197, 160, 255, 0.55);
+			--node-hover-bg: rgba(197, 160, 255, 0.16);
+			--node-hover-glow: rgba(197, 160, 255, 0.14);
+		}
+		[data-node][data-tone='ai'] {
+			--node-glow: rgba(150, 255, 225, 0.20);
+			--node-hover-border: rgba(150, 255, 225, 0.50);
+			--node-hover-bg: rgba(150, 255, 225, 0.14);
+			--node-hover-glow: rgba(150, 255, 225, 0.12);
+		}
+		[data-node][data-tone='growth'] {
+			--node-glow: rgba(190, 255, 180, 0.18);
+			--node-hover-border: rgba(190, 255, 180, 0.48);
+			--node-hover-bg: rgba(190, 255, 180, 0.12);
+			--node-hover-glow: rgba(190, 255, 180, 0.10);
+		}
+		[data-node][data-tone='ops'] {
+			--node-glow: rgba(255, 220, 150, 0.16);
+			--node-hover-border: rgba(255, 220, 150, 0.46);
+			--node-hover-bg: rgba(255, 220, 150, 0.10);
+			--node-hover-glow: rgba(255, 220, 150, 0.10);
+		}
+
+		[data-node]::before {
+			content: '';
+			position: absolute;
+			inset: -14px;
+			border-radius: 9999px;
+			background: radial-gradient(
+				circle at 50% 50%,
+				var(--node-glow),
+				transparent 62%
+			);
+			opacity: 0;
+			filter: blur(0.2px);
+			transition: opacity 140ms ease;
+			pointer-events: none;
+		}
+
+		[data-node]:hover::before {
+			opacity: 1;
+		}
+
+		[data-node]:hover {
+			border-color: var(--node-hover-border) !important;
+			background: var(--node-hover-bg) !important;
+			box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 0 26px var(--node-hover-glow);
+		}
+
+		/* Phase card: floating narrator card (desktop), docked (mobile). */
+		#brainmap-phasecard {
+			position: absolute;
+			left: 50%;
+			top: 74%;
+			transform: translate(-50%, -50%);
+			width: min(440px, calc(100vw - 28px));
+			pointer-events: auto;
+			transition: transform 200ms cubic-bezier(0.2, 1, 0.2, 1);
+		}
+
+		@media (max-width: 900px) {
+			#brainmap-phasecard {
+				left: 14px;
+				right: 14px;
+				top: auto;
+				bottom: 14px;
+				width: auto;
+				transform: none;
+			}
+		}
+
+		/* Node click chat rail (small bubbles stacking down one side) */
+		.nodeChatRail {
+			position: absolute;
+			top: 18%;
+			bottom: 14px;
+			width: min(300px, calc(100vw - 28px));
+			display: flex;
+			flex-direction: column;
+			gap: 10px;
+			pointer-events: none;
+			overflow: hidden;
+		}
+		.nodeChatRail.left {
+			left: clamp(22px, 5vw, 84px);
+			align-items: flex-start;
+		}
+		.nodeChatRail.right {
+			right: clamp(22px, 5vw, 84px);
+			/* keep bubbles toward the center, not the screen edge */
+			align-items: flex-start;
+		}
+
+		.nodeChatBubble {
+			max-width: 100%;
+			opacity: 0;
+			/* Always “write in” left → right */
+			--jx: 0px;
+			--jy: 0px;
+			transform: translateY(calc(-6px + var(--jy))) translateX(calc(-10px + var(--jx)));
+			transition: opacity 160ms cubic-bezier(0.2, 1, 0.2, 1),
+				transform 200ms cubic-bezier(0.2, 1, 0.2, 1);
+		}
+		.nodeChatBubble.in {
+			opacity: 1;
+			transform: translateY(var(--jy)) translateX(var(--jx));
+		}
+		.nodeChatBubble.out {
+			opacity: 0;
+			transform: translateY(calc(6px + var(--jy))) translateX(calc(8px + var(--jx)));
+		}
+
+		.nodeChatBubbleInner {
+			--dx: 0px;
+			--outx: 0px;
+			--rot: 0deg;
+			transform: translateY(-8px) translateX(var(--dx)) rotate(var(--rot));
+			transition: transform 220ms cubic-bezier(0.2, 1, 0.2, 1);
+		}
+		.nodeChatBubble.in .nodeChatBubbleInner {
+			transform: translateY(0px) translateX(var(--dx)) rotate(var(--rot));
+			animation: nodeBubbleDrift 1.9s ease-in-out infinite;
+		}
+		.nodeChatBubble.out .nodeChatBubbleInner {
+			animation: none;
+			transform: translateY(-12px) translateX(var(--outx)) rotate(var(--rot));
+		}
+
+		@keyframes nodeBubbleDrift {
+			0% {
+				transform: translateY(0px) translateX(var(--dx)) rotate(var(--rot));
+			}
+			50% {
+				transform: translateY(-2px) translateX(calc(var(--dx) + 6px)) rotate(var(--rot));
+			}
+			100% {
+				transform: translateY(1px) translateX(calc(var(--dx) - 4px)) rotate(var(--rot));
+			}
+		}
+		.nodeChatBubble .bubble {
+			margin: 0;
+			padding: 8px 10px;
+			border-radius: 14px;
+			font-size: 12px;
+			line-height: 1.35;
+		}
+
+		#brainmap-chat {
+			display: grid;
+			gap: 10px;
+			margin-top: 10px;
+		}
+
+		.bubble {
+			max-width: 100%;
+			border: 1px solid rgba(255, 255, 255, 0.12);
+			border-radius: 16px;
+			padding: 10px 12px;
+			font-size: 13px;
+			line-height: 1.35;
+			color: rgba(255, 255, 255, 0.86);
+			background: rgba(0, 0, 0, 0.42);
+		}
+
+		.bubble.ai {
+			border-color: rgba(255, 255, 255, 0.14);
+			background: rgba(0, 0, 0, 0.48);
+		}
+
+		.bubble.me {
+			justify-self: end;
+			border-color: rgba(255, 255, 255, 0.10);
+			background: rgba(255, 255, 255, 0.06);
+			color: rgba(255, 255, 255, 0.88);
+		}
+
+		.metaLine {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			font-size: 11px;
+			color: rgba(255, 255, 255, 0.55);
+			letter-spacing: 0.04em;
+		}
+
+		.stepArrow {
+			height: 18px;
+			width: 18px;
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			border-radius: 9999px;
+			border: 1px solid rgba(255, 255, 255, 0.14);
+			background: rgba(255, 255, 255, 0.04);
+			color: rgba(255, 255, 255, 0.70);
+			line-height: 1;
+			font-size: 12px;
+			transform: translateZ(0);
+			transition: background 140ms ease, border-color 140ms ease, color 140ms ease,
+				transform 140ms ease;
+			pointer-events: auto;
+		}
+		.stepArrow:hover {
+			background: rgba(255, 255, 255, 0.08);
+			border-color: rgba(255, 255, 255, 0.22);
+			color: rgba(255, 255, 255, 0.9);
+		}
+		.stepArrow:active {
+			transform: translateY(1px);
+		}
+
+		.dotPulse {
+			display: inline-flex;
+			gap: 4px;
+			align-items: center;
+		}
+		.dotPulse span {
+			width: 4px;
+			height: 4px;
+			border-radius: 9999px;
+			background: rgba(255, 255, 255, 0.55);
+			opacity: 0.35;
+			animation: pulse 1.2s infinite;
+		}
+		.dotPulse span:nth-child(2) { animation-delay: 0.15s; }
+		.dotPulse span:nth-child(3) { animation-delay: 0.3s; }
+
+		@keyframes pulse {
+			0%, 100% { opacity: 0.25; transform: translateY(0); }
+			50% { opacity: 0.95; transform: translateY(-2px); }
+		}
+
+		.cursor {
+			display: inline-block;
+			width: 8px;
+			height: 1.1em;
+			vertical-align: text-bottom;
+			border-right: 2px solid rgba(255, 255, 255, 0.75);
+			margin-left: 2px;
+			animation: blink 1.05s steps(1) infinite;
+		}
+
+		.bubble.typing .cursor {
+			display: inline-block;
+		}
+
+		.bubble .cursor {
+			display: none;
+		}
+
+		@keyframes blink {
+			0%, 49% { opacity: 1; }
+			50%, 100% { opacity: 0; }
+		}
+	</style>
+
+	<!-- Scrolly container: sticky scene + tall scroll space -->
+	<!-- Longer scroll so each slide has room. -->
+	<div class="relative" style="min-height: 320vh;">
+		<div class="sticky top-0 h-[100svh] w-full">
+			<div
+				id="brainmap-viewport"
+				class="relative h-full w-full overflow-hidden"
+			>
+				<div id="brainmap-stage">
+					<div class="pointer-events-none absolute inset-0 opacity-70">
+						<div class="absolute inset-0 bg-[radial-gradient(900px_620px_at_50%_10%,rgba(255,255,255,0.07),transparent_60%)]"></div>
+						<div class="absolute inset-0 bg-[radial-gradient(900px_700px_at_50%_110%,rgba(0,0,0,0.55),transparent_60%)]"></div>
+					</div>
+
+					<!-- Brain layer (reveals as the head “opens”, then zooms in) -->
+					<div
+						id="brainmap-brainlayer"
+						class="absolute inset-0 origin-center will-change-transform"
+						style="transform: translateZ(0); opacity: 0;"
+					>
+						<!-- Connection lines (SVG) -->
+						<svg
+							id="brainmap-lines"
+							class="pointer-events-none absolute inset-0 h-full w-full"
+							aria-hidden="true"
+						>
+							{edges.map((e) => (
+								<line
+									data-edge
+									data-from={e.from}
+									data-to={e.to}
+									stroke="rgba(255,255,255,0.14)"
+									stroke-width={e.strength === 'strong' ? 2.25 : 1.25}
+									stroke-linecap="round"
+									vector-effect="non-scaling-stroke"
+								/>
+							))}
+						</svg>
+
+						<!-- Nodes (dots; no wrapper div so DOM stays clean) -->
+						{nodes.map((n) => {
+							const isPrimary = n.kind === 'primary';
+							const Tag = n.href ? 'a' : 'div';
+							return (
+								<Tag
+									id={`node-${n.id}`}
+									data-node
+									data-node-id={n.id}
+									data-label={n.label}
+									data-tone={n.tone}
+									data-theta={n.theta}
+									data-phi={n.phi}
+									href={n.href}
+									target={n.href ? '_blank' : undefined}
+									rel={n.href ? 'noopener noreferrer' : undefined}
+									aria-label={n.label}
+									title={n.label}
+									class:list={[
+										'absolute left-0 top-0 -translate-x-1/2 -translate-y-1/2 select-none rounded-full border backdrop-blur transition',
+										'focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30',
+										isPrimary
+											? 'h-3.5 w-3.5 border-white/30 bg-white/35 shadow-glow'
+											: 'h-2.5 w-2.5 border-white/18 bg-white/18',
+										n.href ? 'cursor-pointer' : 'cursor-default',
+									]}
+								>
+									{/* Intentionally empty: dot-only UI. */}
+								</Tag>
+							);
+						})}
+					</div>
+
+					<!-- Node popups (AI micro-messages on click) -->
+					<div id="brainmap-poplayer" class="pointer-events-none absolute inset-0 z-40">
+						<div id="brainmap-nodechat-left" class="nodeChatRail left"></div>
+						<div id="brainmap-nodechat-right" class="nodeChatRail right"></div>
+					</div>
+
+					<!-- Brain sticker layer (NOT inside head layer, so it never inherits head scaling) -->
+					<div
+						id="brainmap-brain-sticker-layer"
+						class="pointer-events-none absolute left-1/2 top-[40%] z-30 -translate-x-1/2 -translate-y-1/2 will-change-transform"
+					>
+						<img
+							id="brainmap-brain-sticker"
+							class="absolute left-1/2 top-[36%] w-[clamp(170px,24vw,260px)] -translate-x-1/2 -translate-y-1/2 select-none object-contain opacity-0 [filter:drop-shadow(0_0_18px_rgba(255,255,255,0.16))_drop-shadow(0_26px_60px_rgba(0,0,0,0.75))]"
+							src="/brain.png"
+							alt=""
+							aria-hidden="true"
+							decoding="async"
+						/>
+					</div>
+
+					<!-- Head layer (main centerpiece). Scroll: open + zoom into brain. -->
+					<div
+						id="brainmap-headlayer"
+						class="pointer-events-none absolute left-1/2 top-[40%] z-20 -translate-x-1/2 -translate-y-1/2 will-change-transform"
+					>
+						<div class="relative">
+							<div class="absolute -inset-4 rounded-[44px] bg-[conic-gradient(from_180deg_at_50%_50%,hsla(var(--accent-hue),95%,70%,0.26),transparent_28%,hsla(calc(var(--accent-hue)+90),95%,70%,0.22),transparent_64%)] blur-2xl"></div>
+
+						<!-- Top half “lid” -->
+						<img
+							id="brainmap-head-top"
+							class="absolute left-1/2 top-1/2 w-[clamp(220px,34vw,380px)] -translate-x-1/2 -translate-y-1/2 select-none object-contain [clip-path:polygon(0_0,100%_0,100%_48%,92%_47%,84%_49%,76%_47%,68%_49%,60%_47%,52%_49%,44%_47%,36%_49%,28%_47%,20%_49%,12%_47%,0_48%)] [filter:drop-shadow(0_26px_50px_rgba(0,0,0,0.65))]"
+							src="/headshot.png"
+							alt=""
+							aria-hidden="true"
+							decoding="async"
+						/>
+							<!-- Bottom half “base” -->
+							<img
+								id="brainmap-head-bottom"
+								class="relative w-[clamp(220px,34vw,380px)] select-none object-contain [clip-path:polygon(0_48%,12%_47%,20%_49%,28%_47%,36%_49%,44%_47%,52%_49%,60%_47%,68%_49%,76%_47%,84%_49%,92%_47%,100%_48%,100%_100%,0_100%)] [filter:drop-shadow(0_26px_50px_rgba(0,0,0,0.65))]"
+								src="/headshot.png"
+								alt="Daniel Smidstrup"
+								width="420"
+								height="420"
+								loading="eager"
+								decoding="async"
+								fetchpriority="high"
+							/>
+						</div>
+					</div>
+				</div>
+
+				<!-- Phase card (chat narrator UI) -->
+				<div id="brainmap-phasecard" class="glass relative overflow-hidden rounded-[20px] border border-white/12 bg-black/25 p-4 shadow-glow sm:p-5">
+					<div class="pointer-events-none absolute inset-0 opacity-35">
+						<div class="absolute -left-16 -top-20 h-56 w-56 rounded-full bg-[radial-gradient(circle,rgba(255,255,255,0.10),transparent_62%)] blur-2xl"></div>
+					</div>
+					<div class="relative">
+						<div class="metaLine">
+							<span>AI narrator</span>
+							<span class="dotPulse" aria-hidden="true"><span></span><span></span><span></span></span>
+							<span>•</span>
+							<span>Daniel Smidstrup</span>
+							<span>•</span>
+							<button id="brainmap-step-prev" class="stepArrow" type="button" aria-label="Previous step">
+								‹
+							</button>
+							<span id="brainmap-stepmeta">Step</span>
+							<button id="brainmap-step-next" class="stepArrow" type="button" aria-label="Next step">
+								›
+							</button>
+						</div>
+						<h1 class="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">
+							<span id="brainmap-title">{steps[0].title}</span>
+						</h1>
+						<div id="brainmap-chat">
+							<div class="bubble ai typing">
+								<span id="brainmap-body">{steps[0].body}</span><span class="cursor" aria-hidden="true"></span>
+							</div>
+						</div>
+						<div class="mt-4 flex flex-wrap items-center gap-2">
+							<a
+								id="brainmap-cta-linkedin"
+								class="relative inline-flex items-center justify-center rounded-full border border-white/14 bg-white/5 px-3 py-2 text-sm font-medium text-white/90 transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+								href="https://www.linkedin.com/in/daniel-smidstrup-b98390226/"
+								rel="noopener noreferrer"
+								target="_blank"
+							>
+								LinkedIn DM
+							</a>
+							<a
+								id="brainmap-cta-userlink"
+								class="relative inline-flex items-center justify-center rounded-full border border-white/14 bg-white/5 px-3 py-2 text-sm font-medium text-white/90 transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+								href="https://userlink.ai/"
+								rel="noopener noreferrer"
+								target="_blank"
+							>
+								Userlink
+							</a>
+						</div>
+					</div>
+				</div>
+
+				<!-- SEO fallback (real text content). Hidden visually but stays in DOM. -->
+				<div class="sr-only" aria-hidden="false">
+					<p>
+					Daniel Smidstrup is the Co-founder & CTO at{' '}
+					<a href="https://userlink.ai/" target="_blank" rel="noopener noreferrer">Userlink</a>. Connect on{' '}
+					<a href="https://www.linkedin.com/in/daniel-smidstrup-b98390226/" target="_blank" rel="noopener noreferrer">LinkedIn</a>.
+					</p>
+					<ol>
+						{steps.map((s) => (
+							<li>
+								<strong>{s.title}</strong>: {s.body}
+							</li>
+						))}
+					</ol>
+				</div>
+			</div>
+		</div>
+	</div>
+</section>
+
+<script>
+	(() => {
+		const reduceMotion =
+			window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+		// Still allow navigation/copy updates; we just avoid “typing” effects below.
+
+		const root = document.getElementById('brainmap');
+		const viewport = document.getElementById('brainmap-viewport');
+		const stageEl = document.getElementById('brainmap-stage');
+		const titleEl = document.getElementById('brainmap-title');
+		const bodyEl = document.getElementById('brainmap-body');
+		const linesSvg = document.getElementById('brainmap-lines');
+		const phaseCard = document.getElementById('brainmap-phasecard');
+		const chatEl = document.getElementById('brainmap-chat');
+		const stepMetaEl = document.getElementById('brainmap-stepmeta');
+		const stepPrevEl = document.getElementById('brainmap-step-prev');
+		const stepNextEl = document.getElementById('brainmap-step-next');
+		const popLayer = document.getElementById('brainmap-poplayer');
+		const nodeChatLeft = document.getElementById('brainmap-nodechat-left');
+		const nodeChatRight = document.getElementById('brainmap-nodechat-right');
+
+		// Arrows are optional (don’t break scroll-driven updates if DOM is stale).
+		if (!root || !viewport || !stageEl || !titleEl || !bodyEl || !linesSvg || !phaseCard || !chatEl || !stepMetaEl || !popLayer || !nodeChatLeft || !nodeChatRight) return;
+
+		const stepCount = Number(root.getAttribute('data-step-count') || '1');
+		const nodes = Array.from(stageEl.querySelectorAll('[data-node]'));
+		const edges = Array.from(linesSvg.querySelectorAll('[data-edge]'));
+
+		const nodeData = nodes.map((el) => ({
+			el,
+			id: el.getAttribute('data-node-id'),
+			label: el.getAttribute('data-label') || '',
+			href: el.getAttribute('href'),
+			theta: Number(el.getAttribute('data-theta') || '0'),
+			phi: Number(el.getAttribute('data-phi') || '90'),
+		}));
+		const labelById = new Map(nodeData.map((n) => [n.id, n.label]));
+
+		const clamp01 = (v) => Math.min(1, Math.max(0, v));
+		const lerp = (a, b, t) => a + (b - a) * t;
+
+		let raf = 0;
+		let lastStep = -1;
+
+		// Inline copy list (kept here to avoid any network/JSON fetch)
+		const steps = [
+			{
+				title: 'Daniel',
+				body: 'A scrollable snapshot of me — trying a new perspective on a personal webpage.',
+				messages: [
+					{ role: 'ai', text: 'This is Daniel’s page — a process, not a CV.' },
+					{ role: 'ai', text: 'Scroll to move through my timeline (and click nodes for side notes).' },
+				],
+			},
+			{
+				title: 'Software',
+				body: 'I like building software that feels sharp: simple architecture, strong UX, and fast feedback.',
+				messages: [
+					{ role: 'ai', text: 'Baseline: ship simple software people actually want to use.' },
+					{ role: 'ai', text: 'Keeping it simple seems to work every time!' },
+				],
+			},
+			{
+				title: 'Masters',
+				body: 'Formal training helped, but I mostly learned by building, shipping, and measuring.',
+				messages: [
+					{ role: 'ai', text: 'Theory helps.' },
+					{ role: 'ai', text: 'But the real teacher is iteration: build → measure → adjust.' },
+				],
+			},
+			{
+				title: 'Human-AI collaboration',
+				body: 'I care about collaboration: humans set direction and taste; AI provides leverage and speed.',
+				messages: [
+					{ role: 'ai', text: 'Best-of-both-worlds rule:' },
+					{ role: 'ai', text: 'Humans: intent + taste. AI: throughput + variation.' },
+				],
+			},
+			{
+				title: 'Startups',
+				body: 'Startups are my lab: constraints, iteration, and learning under time pressure.',
+				messages: [
+					{ role: 'ai', text: 'Constraint creates signal.' },
+					{ role: 'ai', text: 'Startups force the loop to stay tight.' },
+				],
+			},
+			{
+				title: 'Lessons',
+				body: 'The meta-skill is clarity: define the problem, pick the levers, remove noise.',
+				messages: [
+					{ role: 'ai', text: 'Lesson: clarity is a multiplier.' },
+					{ role: 'ai', text: 'Name the problem. Choose a lever. Remove noise.' },
+				],
+			},
+			{
+				title: 'Problems',
+				body: 'I’m fascinated by problems: behavior, systems, incentives, and data.',
+				messages: [
+					{ role: 'ai', text: 'I’m drawn to hard problems with steep learning curves.' },
+					{ role: 'ai', text: 'If it’s uncomfortable to learn, it’s probably worth learning.' },
+				],
+			},
+			{
+				title: 'Userlink',
+				body: 'At Userlink we build AI-native workflows that turn interest into action.',
+				messages: [
+					{ role: 'ai', text: 'Main output: what I’m building at Userlink.' },
+					{ role: 'ai', text: 'AI-native workflows that turn interest into action.' },
+				],
+			},
+			{
+				title: 'CTO',
+				body: 'As CTO I design teams and systems: interfaces, ownership, and operational calm.',
+				messages: [
+					{ role: 'ai', text: 'CTO mode: design the system that builds the system.' },
+					{ role: 'ai', text: 'Interfaces, ownership, and calm execution.' },
+				],
+			},
+			{
+				title: 'Next',
+				body: 'Want to see what we’re building? Check out Userlink — or DM me on LinkedIn.',
+				messages: [
+					{ role: 'ai', text: 'If this sparked something, here’s the next step:' },
+					{ role: 'ai', text: 'Check out Userlink, or hit me up on LinkedIn.' },
+				],
+			},
+		];
+
+		let typingTimer = 0;
+		// Node chat bubbles type independently (don’t interfere with narrator typing).
+		const clearTyping = () => {
+			if (typingTimer) window.clearTimeout(typingTimer);
+			typingTimer = 0;
+		};
+
+		const typeInto = (el, text, onDone, speed = 10) => {
+			if (reduceMotion) {
+				el.textContent = text;
+				onDone?.();
+				return;
+			}
+			clearTyping();
+			el.textContent = '';
+			let i = 0;
+			const tick = () => {
+				i++;
+				el.textContent = text.slice(0, i);
+				if (i < text.length) {
+					typingTimer = window.setTimeout(tick, speed);
+				} else {
+					typingTimer = 0;
+					onDone?.();
+				}
+			};
+			tick();
+		};
+
+		const setCopy = (idx) => {
+			const safe = Math.min(stepCount - 1, Math.max(0, idx));
+			const step = steps[safe];
+			stepMetaEl.textContent = `Step ${safe + 1}/${stepCount}`;
+
+			// Render chat bubbles (AI narrator style).
+			chatEl.innerHTML = '';
+			const spans = [];
+			for (let j = 0; j < step.messages.length; j++) {
+				const m = step.messages[j];
+				const bubble = document.createElement('div');
+				bubble.className = `bubble ${m.role === 'me' ? 'me' : 'ai'}`;
+				const span = document.createElement('span');
+				bubble.appendChild(span);
+				const cursor = document.createElement('span');
+				cursor.className = 'cursor';
+				cursor.setAttribute('aria-hidden', 'true');
+				bubble.appendChild(cursor);
+				chatEl.appendChild(bubble);
+				spans.push({ bubble, span, text: m.text });
+			}
+
+			// Type title + all lines (slide feel).
+			for (let i = 0; i < spans.length; i++) spans[i].bubble.classList.remove('typing');
+			titleEl.textContent = '';
+			typeInto(titleEl, step.title, () => {
+				const typeNext = (k) => {
+					if (k >= spans.length) return;
+					for (let i = 0; i < spans.length; i++) {
+						spans[i].bubble.classList.toggle('typing', i === k);
+					}
+					typeInto(spans[k].span, spans[k].text, () => typeNext(k + 1), 11);
+				};
+				typeNext(0);
+			}, 14);
+
+			// Keep bodyEl in sync for SEO-ish fallback text inside the card.
+			bodyEl.textContent = step.body;
+		};
+
+		const nodePopCopy = {
+			daniel: [
+				'This is the map. Scroll = time. Click nodes = side notes.',
+				'Not a CV. A process: build, learn, ship, repeat.',
+			],
+			software: [
+				'Simplicity is a feature: fewer moving parts, faster iteration.',
+				'UX is the interface to your architecture.',
+			],
+			masters: [
+				'Theory gives vocabulary. Shipping gives truth.',
+				'The loop wins: build → measure → adjust.',
+			],
+			human_ai: [
+				'Human intent + taste. AI throughput + variation.',
+				'Collaboration beats automation.',
+			],
+			meaning: [
+				'Meaning: build things that matter, not just things that ship.',
+				'Taste + purpose is a better filter than “more features”.',
+			],
+			hustle: [
+				'Hustle is energy, but direction is everything.',
+				'Speed is only useful when you’re learning the right thing.',
+			],
+			startup: [
+				'Constraints create signal. Speed creates learning.',
+				'The only unfair advantage is iteration velocity.',
+			],
+			lessons: [
+				'Clarity is the multiplier: define → choose lever → remove noise.',
+			],
+			problems: [
+				'I like hard problems with steep learning curves.',
+				'New domain? Great. I brought snacks and a notebook.',
+			],
+			data_analysis: [
+				'Data analysis is where intuition meets reality.',
+				'Great decisions are usually: one metric, one lever, tight iteration.',
+			],
+			ai: [
+				'AI is leverage. The product is the workflow, not the model.',
+				'Make it reliable, observable, and useful to real people.',
+			],
+			llms: [
+				'LLMs are engines. Reliability is the product.',
+				'Guardrails, evals, and UX make agents feel real.',
+			],
+			agents: [
+				'Agents are workflows with memory, tools, and constraints.',
+				'The hard part: predictability under messy inputs.',
+			],
+			tools: [
+				'Tools turn language into action. Observability keeps it sane.',
+			],
+			chatbots: [
+				'Chat is the UI. The real win is what happens after the message.',
+				'Good bots feel like products, not demos.',
+			],
+			math: [
+				'Math is a beauty: it keeps you honest about tradeoffs.',
+			],
+			experiments: [
+				'Experiments are how ideas become knowledge.',
+				'Ship small, measure, iterate. Repeat until it’s “obvious in hindsight”.',
+			],
+			userlink: [
+				'Userlink: practical AI that shows up in real workflows.',
+			],
+			cto: [
+				'CTO mode: systems, hiring, priorities, and shipping cadence.',
+			],
+			scaling: [
+				'Scale is mostly communication + constraints + ownership.',
+			],
+			management: [
+				'Management is reducing ambiguity and increasing throughput.',
+				'Clear ownership beats heroics.',
+			],
+			organization: [
+				'Organization is how teams keep promises to each other.',
+				'Interfaces aren’t just APIs — they’re people and processes too.',
+			],
+			growth: [
+				'Growth is distribution + retention + timing.',
+				'The best loop is the one that compounds without noise.',
+			],
+			linkedin: [
+				'LinkedIn is the public loop: share → learn → refine.',
+				'Short writing forces clarity (and occasionally mild embarrassment).',
+			],
+			writing: [
+				'Writing is how I compress ideas.',
+				'If I can’t explain it simply, I don’t understand it yet.',
+			],
+			network: [
+				'Network is trust over time.',
+				'Give value, stay consistent, compound quietly.',
+			],
+			distribution: [
+				'Distribution is where good products become real businesses.',
+				'Packaging + timing + channels.',
+			],
+		};
+
+		const typeIntoLocal = (el, text, onDone, speed = 10) => {
+			if (reduceMotion) {
+				el.textContent = text;
+				onDone?.();
+				return () => {};
+			}
+			el.textContent = '';
+			let i = 0;
+			let timer = 0;
+			const tick = () => {
+				i++;
+				el.textContent = text.slice(0, i);
+				if (i < text.length) {
+					timer = window.setTimeout(tick, speed);
+				} else {
+					timer = 0;
+					onDone?.();
+				}
+			};
+			tick();
+			return () => {
+				if (timer) window.clearTimeout(timer);
+			};
+		};
+
+		const pushNodeChat = (side, id) => {
+			const pos = positions.get(id);
+			if (!pos) return;
+
+			const vr = stageEl.getBoundingClientRect();
+			const centerX = vr.width / 2;
+			const which = side || (pos.x < centerX ? 'left' : 'right');
+			const rail = which === 'left' ? nodeChatLeft : nodeChatRight;
+
+			// Keep only a few bubbles visible.
+			while (rail.children.length >= 4) rail.removeChild(rail.firstChild);
+
+			const wrap = document.createElement('div');
+			wrap.className = 'nodeChatBubble';
+			// Jitter each bubble a bit so it feels alive.
+			pushNodeChat._c = (pushNodeChat._c || 0) + 1;
+			const k = pushNodeChat._c;
+			const frac = (x) => x - Math.floor(x);
+			const a = frac(Math.sin((k + 1) * 999.7) * 10000);
+			const b = frac(Math.sin((k + 1) * 1337.3) * 10000);
+			const jx = Math.round((a - 0.5) * 14); // left/right
+			const jy = Math.round((b - 0.5) * 18); // up/down
+			wrap.style.setProperty('--jx', `${jx}px`);
+			wrap.style.setProperty('--jy', `${jy}px`);
+
+			const bubble = document.createElement('div');
+			// Keep node-click bubbles consistent (AI writes left → right on both sides).
+			bubble.className = 'bubble ai typing';
+
+			const span = document.createElement('span');
+			const cursor = document.createElement('span');
+			cursor.className = 'cursor';
+			cursor.setAttribute('aria-hidden', 'true');
+
+			bubble.appendChild(span);
+			bubble.appendChild(cursor);
+			wrap.appendChild(bubble);
+			rail.appendChild(wrap);
+
+			requestAnimationFrame(() => wrap.classList.add('in'));
+
+			const label = labelById.get(id) || 'This node';
+			const arr = nodePopCopy[id] || [
+				`${label}: a quick side note from the map.`,
+				'Tip: scroll for the main story; click nodes for branches.',
+			];
+			const pick = arr[Math.floor((performance.now() / 1000) % arr.length)];
+
+			typeIntoLocal(span, pick, () => {
+				bubble.classList.remove('typing');
+				window.setTimeout(() => {
+					wrap.classList.add('out');
+					window.setTimeout(() => wrap.remove(), 220);
+				}, 1400);
+			}, 10);
+		};
+
+		for (const n of nodeData) {
+			const id = n.id || '';
+			if (!id) continue;
+			n.el.addEventListener('click', () => pushNodeChat(null, id));
+		}
+
+		const getActiveStepFromScroll = () => {
+			const rootRect = root.getBoundingClientRect();
+			const total = rootRect.height - window.innerHeight;
+			const raw = total <= 1 ? 0 : clamp01((-rootRect.top) / total);
+			const storyStart = 0.34;
+			const storyProgress = clamp01((raw - storyStart) / (1 - storyStart));
+			const stepFloat = storyProgress * stepCount;
+			return Math.min(stepCount - 1, Math.max(0, Math.floor(stepFloat)));
+		};
+
+		const scrollToStep = (stepIdx) => {
+			const s = Math.min(stepCount - 1, Math.max(0, stepIdx));
+			const rootRect = root.getBoundingClientRect();
+			const total = rootRect.height - window.innerHeight;
+			if (total <= 1) return;
+			const rootDocTop = window.scrollY + rootRect.top;
+
+			// Step 0 lives before storyProgress starts; keep it at the top.
+			const storyStart = 0.34;
+			const storySpan = 1 - storyStart;
+			const rawTarget =
+				s <= 0 ? 0 : clamp01(storyStart + storySpan * ((s + 0.5) / stepCount));
+
+			const y = rootDocTop + rawTarget * total;
+			window.scrollTo({ top: y, behavior: reduceMotion ? 'auto' : 'smooth' });
+		};
+
+		if (stepPrevEl && stepNextEl) {
+			stepPrevEl.addEventListener('click', (e) => {
+				e.preventDefault();
+				scrollToStep(getActiveStepFromScroll() - 1);
+			});
+			stepNextEl.addEventListener('click', (e) => {
+				e.preventDefault();
+				scrollToStep(getActiveStepFromScroll() + 1);
+			});
+		}
+
+		const headLayer = document.getElementById('brainmap-headlayer');
+		const headTop = document.getElementById('brainmap-head-top');
+		const headBottom = document.getElementById('brainmap-head-bottom');
+		const brainSticker = document.getElementById('brainmap-brain-sticker');
+		const brainStickerLayer = document.getElementById('brainmap-brain-sticker-layer');
+		const brainLayer = document.getElementById('brainmap-brainlayer');
+		const ctaLinkedIn = document.getElementById('brainmap-cta-linkedin');
+		const ctaUserlink = document.getElementById('brainmap-cta-userlink');
+
+		const positions = new Map(); // nodeId -> {x,y,depth} in viewport px
+		const appear = new Map(); // nodeId -> 0..1 (for “learning” intro)
+		const neighbors = new Map();
+		for (const line of edges) {
+			const from = line.getAttribute('data-from');
+			const to = line.getAttribute('data-to');
+			if (!from || !to) continue;
+			if (!neighbors.has(from)) neighbors.set(from, new Set());
+			if (!neighbors.has(to)) neighbors.set(to, new Set());
+			neighbors.get(from).add(to);
+			neighbors.get(to).add(from);
+		}
+
+		const updateLines = (focusId, nearSet) => {
+			for (const line of edges) {
+				const from = line.getAttribute('data-from');
+				const to = line.getAttribute('data-to');
+				const a = from ? positions.get(from) : null;
+				const b = to ? positions.get(to) : null;
+				if (!a || !b) continue;
+				line.setAttribute('x1', String(a.x));
+				line.setAttribute('y1', String(a.y));
+				line.setAttribute('x2', String(b.x));
+				line.setAttribute('y2', String(b.y));
+
+				// “Smarter” emphasis: highlight focus cluster connections.
+				const isFocusEdge = from === focusId || to === focusId;
+				const isNearEdge =
+					(nearSet && from && nearSet.has(from)) || (nearSet && to && nearSet.has(to));
+
+				const baseOpacity = isFocusEdge ? 0.55 : isNearEdge ? 0.26 : 0.1;
+
+				// “Learning” draw-in: only draw edges once endpoints appear.
+				const af = from ? appear.get(from) ?? 1 : 1;
+				const at = to ? appear.get(to) ?? 1 : 1;
+				const draw = Math.min(af, at);
+				const len = Math.hypot(b.x - a.x, b.y - a.y);
+				line.style.strokeDasharray = `${len}`;
+				line.style.strokeDashoffset = `${Math.max(0, len * (1 - draw))}`;
+				line.style.strokeOpacity = String(baseOpacity * (0.2 + 0.8 * draw));
+				// Depth hint: slightly thicker when closer.
+				const depth = Math.min(a.depth ?? 0.5, b.depth ?? 0.5);
+				line.style.strokeWidth = String((line.getAttribute('stroke-width') ? Number(line.getAttribute('stroke-width')) : 1.25) * (0.75 + depth * 0.6));
+			}
+		};
+
+		// Reveal order aligned with the story (not node array order).
+		const revealOrder = [
+			// Story order
+			'daniel',
+			'software',
+			'masters',
+			'human_ai',
+			'startup',
+			'lessons',
+			'problems',
+			'llms',
+			'agents',
+			'tools',
+			'chatbots',
+			'userlink',
+			'cto',
+			'scaling',
+			// Supporting cluster
+			'data_analysis',
+			'ai',
+			'math',
+			'management',
+			'organization',
+			'growth',
+			'experiments',
+			'linkedin',
+			'writing',
+			'network',
+			'distribution',
+			'hustle',
+			'meaning',
+		];
+		const revealRank = new Map();
+		for (let i = 0; i < revealOrder.length; i++) revealRank.set(revealOrder[i], i);
+
+		let lastCardStep = -1;
+		const jitterForStep = (n) => {
+			// Deterministic “random” from step index (no Math.random).
+			const a = Math.sin((n + 1) * 999.7) * 10000;
+			const b = Math.sin((n + 1) * 1337.3) * 10000;
+			const c = Math.sin((n + 1) * 777.1) * 10000;
+			const frac = (x) => x - Math.floor(x);
+			const jx = Math.round((frac(a) - 0.5) * 58);
+			const jy = Math.round((frac(b) - 0.5) * 42);
+			const rot = (frac(c) - 0.5) * 5.0;
+			return { jx, jy, rot };
+		};
+
+		const update = () => {
+			raf = 0;
+			const rootRect = root.getBoundingClientRect();
+			const total = rootRect.height - window.innerHeight;
+			const raw = total <= 1 ? 0 : clamp01((-rootRect.top) / total);
+
+			// Start immediately (no dead scroll).
+			const progress = raw;
+
+			// Phase timing (fast):
+			// - open: quick lid lift
+			// - headOut: head + stickers disappear almost fully
+			// (brain network stays centered; only the brain sticker “walks out”)
+			const open = clamp01((progress - 0.02) / 0.10);
+			const headOut = clamp01((progress - 0.12) / 0.10);
+			// Slow down the “learning” reveal.
+			const learn = clamp01((progress - 0.32) / 0.22);
+
+			// Story progression: slide changes only at thresholds.
+			const storyStart = 0.34;
+			const storyProgress = clamp01((progress - storyStart) / (1 - storyStart));
+			const stepFloat = storyProgress * stepCount;
+			const activeStep = Math.min(stepCount - 1, Math.max(0, Math.floor(stepFloat)));
+
+			// Head transforms
+			if (headLayer) {
+				// Quick “zoom into face”, then vanish before brain reveals.
+				const zoomFace = clamp01((progress - 0.06) / 0.08);
+				const headScale = 1 + zoomFace * 0.9 + headOut * 1.6;
+				const headFade = 1 - headOut;
+				headLayer.style.opacity = String(Math.max(0, headFade));
+				headLayer.style.transform =
+					`translate(-50%, -50%) translateY(${-Math.round(zoomFace * 26 + headOut * 42)}px) scale(${headScale}) translateZ(0)`;
+				headLayer.style.transformOrigin = '50% 42%';
+			}
+			if (headTop) {
+				const lift = Math.round(open * 86);
+				const rot = (open * -10).toFixed(2);
+				headTop.style.transform =
+					`translate(-50%, -50%) translateY(${-lift}px) rotate(${rot}deg)`;
+				headTop.style.opacity = String(Math.max(0, 1 - headOut * 1.2));
+			}
+			if (headBottom) {
+				const rot = (open * 3.4).toFixed(2);
+				headBottom.style.transform = `rotate(${rot}deg)`;
+				headBottom.style.opacity = String(Math.max(0, 1 - headOut * 1.2));
+			}
+
+			// Brain sticker pops as the lid opens, then yields to the deep zoom.
+			if (brainSticker) {
+				// Guaranteed visibility during split:
+				// appears as lid opens, starts walking as Daniel fades.
+				// If the lid math ever fails (due to scroll timing), still show it as long as Daniel is present.
+				const show = Math.max(clamp01(open * 1.15), clamp01(1 - headOut));
+				const walk = clamp01((headOut - 0.05) / 0.95);
+
+				const walkPhase = progress * Math.PI * 12;
+				const sway = Math.sin(walkPhase) * 10 * walk;
+				const bob = Math.abs(Math.cos(walkPhase)) * 7 * walk;
+
+				const x = Math.round(walk * 260 + sway);
+				const y = Math.round((1 - show) * 10 - bob);
+				const rot = (Math.sin(walkPhase * 0.5) * 3.2 * walk).toFixed(2);
+
+				// Visible through split; fades late.
+				const fadeOut = 1 - clamp01((progress - 0.86) / 0.12);
+				brainSticker.style.opacity = String(Math.max(0, show * fadeOut));
+
+				// No scale here on purpose.
+				brainSticker.style.transform = `translate(-50%, -50%) translate(${x}px, ${y}px) rotate(${rot}deg)`;
+			}
+
+			// Keep the brain sticker layer present (it animates independently).
+			if (brainStickerLayer) brainStickerLayer.style.opacity = '1';
+
+			// Brain layer stays centered (sphere rotation handles motion).
+			if (brainLayer) {
+				const brainReveal = clamp01((progress - 0.06) / 0.12); // becomes visible during opening
+				const brainOpacity = Math.min(1, brainReveal * 1.15);
+				brainLayer.style.opacity = String(brainOpacity);
+				brainLayer.style.transformOrigin = '50% 38%';
+				brainLayer.style.transform = `translateZ(0)`;
+			}
+
+			positions.clear();
+			appear.clear();
+
+			const vr = stageEl.getBoundingClientRect();
+			const cx = vr.width / 2;
+			const cy = vr.height / 2;
+			const r = Math.min(vr.width, vr.height) * 0.34;
+
+			// Rotate the sphere with scroll (societies.io-like “clock” feel).
+			// Slower rotation so it feels readable.
+			const rotY = storyProgress * Math.PI * 1.35;
+			const rotX = -0.55 + Math.sin(storyProgress * Math.PI * 2) * 0.10;
+
+			const deg2rad = (d) => (d * Math.PI) / 180;
+			const rotateY = (p, a) => {
+				const ca = Math.cos(a);
+				const sa = Math.sin(a);
+				return { x: p.x * ca + p.z * sa, y: p.y, z: -p.x * sa + p.z * ca };
+			};
+			const rotateX = (p, a) => {
+				const ca = Math.cos(a);
+				const sa = Math.sin(a);
+				return { x: p.x, y: p.y * ca - p.z * sa, z: p.y * sa + p.z * ca };
+			};
+
+			for (let idx = 0; idx < nodeData.length; idx++) {
+				const n = nodeData[idx];
+				const theta = deg2rad(n.theta);
+				const phi = deg2rad(n.phi);
+
+				// Sphere point
+				const p0 = {
+					x: r * Math.cos(theta) * Math.sin(phi),
+					y: r * Math.sin(theta) * Math.sin(phi),
+					z: r * Math.cos(phi),
+				};
+
+				const p1 = rotateY(rotateX(p0, rotX), rotY);
+
+				// Perspective projection
+				const depth = (p1.z / r + 1) / 2; // 0..1
+				const scale = 0.72 + depth * 0.55;
+				const x = Math.round(cx + p1.x);
+				const y = Math.round(cy + p1.y * 0.88);
+
+				// Learning intro: nodes appear one-by-one in process order.
+				const order = revealRank.get(n.id) ?? idx;
+				const a = clamp01((learn * (revealOrder.length + 2) - order) / 2);
+				if (n.id) appear.set(n.id, a);
+
+				// Base transform (extra scale later in focus loop).
+				n.el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%) scale(${scale})`;
+				if (n.id) positions.set(n.id, { x, y, depth });
+			}
+
+			// Focus cluster per step (story).
+			// activeStep is computed earlier as a step-based “slide”.
+			const focusByStep = [
+				'daniel',
+				'software',
+				'masters',
+				'human_ai',
+				'startup',
+				'lessons',
+				'problems',
+				'userlink',
+				'cto',
+				'userlink',
+			];
+			const focusId = focusByStep[Math.min(focusByStep.length - 1, Math.max(0, activeStep))] || 'daniel';
+			const nearSet = neighbors.get(focusId) || new Set();
+
+			// Side tracks (soft highlight) to make it feel multi-branch, not random.
+			const llmTrack = new Set(['llms', 'agents', 'tools', 'chatbots', 'ai', 'math', 'experiments']);
+			const linkedInTrack = new Set(['linkedin', 'writing', 'network', 'distribution', 'growth', 'userlink']);
+
+			const trackSet = new Set();
+			if (activeStep >= 6) for (const id of llmTrack) trackSet.add(id); // after Problems
+			if (activeStep >= 7) for (const id of linkedInTrack) trackSet.add(id); // after Userlink
+
+			// Floating narrator card: sphere stays centered, card hops around it (desktop).
+			const isMobile = window.matchMedia && window.matchMedia('(max-width: 900px)').matches;
+			if (!isMobile) {
+				const cardRect = phaseCard.getBoundingClientRect();
+				const cardW = cardRect.width || 440;
+				const cardH = cardRect.height || 240;
+
+				const centerX = vr.width / 2;
+				const centerY = vr.height / 2;
+				const focusPos = positions.get(focusId);
+
+				let dirX = 1;
+				let dirY = 0;
+				if (focusPos) {
+					dirX = focusPos.x - centerX;
+					dirY = focusPos.y - centerY;
+					const mag = Math.max(1, Math.hypot(dirX, dirY));
+					dirX /= mag;
+					dirY /= mag;
+				}
+
+			// Position well outside the sphere radius (avoid overlap).
+			const sphereR = Math.min(vr.width, vr.height) * 0.34;
+			const safeR = sphereR + Math.max(cardW, cardH) * 0.62 + 52;
+			const angles = [0.15, 2.75, 1.05, 4.05, 0.65, 3.35, 1.75, 4.75];
+			const ang = angles[activeStep % angles.length];
+			let baseX = centerX + Math.cos(ang) * safeR;
+			let baseY = centerY + Math.sin(ang) * (safeR * 0.72);
+
+				// Intro: place just below the head sticker (not near screen bottom).
+				if (activeStep <= 0) {
+					baseX = centerX;
+					if (headBottom) {
+						const hb = headBottom.getBoundingClientRect();
+						const stageTop = vr.top;
+						const belowHeadY = (hb.bottom - stageTop) + cardH / 2 + 18;
+						baseY = belowHeadY;
+					} else {
+						baseY = centerY + safeR * 0.18;
+					}
+				}
+
+				// Snappy deterministic hop per step.
+				if (activeStep !== lastCardStep) {
+					lastCardStep = activeStep;
+					const { jx, jy, rot } = jitterForStep(activeStep);
+					phaseCard.dataset.jx = String(jx);
+					phaseCard.dataset.jy = String(jy);
+					phaseCard.dataset.rot = String(rot);
+				}
+				const jx = Number(phaseCard.dataset.jx || '0');
+				const jy = Number(phaseCard.dataset.jy || '0');
+				const rot = Number(phaseCard.dataset.rot || '0');
+
+				const margin = 14;
+				const minX = margin + cardW / 2;
+				const maxX = vr.width - margin - cardW / 2;
+				const minY = margin + cardH / 2;
+				const maxY = vr.height - margin - cardH / 2;
+
+				const x = Math.round(Math.min(maxX, Math.max(minX, baseX + jx)));
+				const y = Math.round(Math.min(maxY, Math.max(minY, baseY + jy)));
+
+				phaseCard.style.left = `${x}px`;
+				phaseCard.style.top = `${y}px`;
+				phaseCard.style.transform = `translate(-50%, -50%) rotate(${rot.toFixed(2)}deg)`;
+			}
+
+			// CTA emphasis: last step => Userlink primary, LinkedIn secondary.
+			const isFinal = activeStep >= focusByStep.length - 1;
+			if (ctaUserlink && ctaLinkedIn) {
+				if (isFinal) {
+					ctaUserlink.className =
+						'relative inline-flex items-center justify-center rounded-full bg-white px-3 py-2 text-sm font-medium text-black shadow-glow transition hover:bg-white/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40';
+					ctaLinkedIn.className =
+						'relative inline-flex items-center justify-center rounded-full border border-white/14 bg-white/5 px-3 py-2 text-sm font-medium text-white/90 transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30';
+				} else {
+					ctaLinkedIn.className =
+						'relative inline-flex items-center justify-center rounded-full bg-white px-3 py-2 text-sm font-medium text-black shadow-glow transition hover:bg-white/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40';
+					ctaUserlink.className =
+						'relative inline-flex items-center justify-center rounded-full border border-white/14 bg-white/5 px-3 py-2 text-sm font-medium text-white/90 transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30';
+				}
+			}
+
+			for (const n of nodeData) {
+				const id = n.id || '';
+				const isFocus = id === focusId;
+				const isNear = nearSet.has(id);
+				const isTrack = trackSet.has(id);
+				n.el.dataset.showLabel = isFocus || isNear || isTrack ? '1' : '0';
+
+				// Keep dots consistent; emphasize focus with size/opacity.
+				const base = id === 'daniel' || id === 'userlink' ? 14 : 10;
+				const size = isFocus ? 26 : isNear ? 16 : base;
+				n.el.style.width = `${size}px`;
+				n.el.style.height = `${size}px`;
+				const learned = appear.get(id) ?? 1;
+				const targetOpacity = isFocus ? 1 : isNear ? 0.78 : isTrack ? 0.42 : 0.22;
+				const pos = id ? positions.get(id) : null;
+				const depth = pos?.depth ?? 0.5;
+				const depthOpacity = 0.22 + depth * 0.78;
+				n.el.style.opacity = String(targetOpacity * learned * depthOpacity);
+				// Pop-in feel + bring focus forward.
+				const pop = 0.6 + learned * 0.4 + (isFocus ? 0.12 : 0);
+				n.el.style.transform += ` scale(${pop})`;
+			}
+
+			updateLines(focusId, nearSet);
+
+			if (activeStep !== lastStep) {
+				lastStep = activeStep;
+				setCopy(activeStep);
+			}
+		};
+
+		const onScroll = () => {
+			if (raf) return;
+			raf = requestAnimationFrame(update);
+		};
+
+		// Initial layout
+		update();
+		window.addEventListener('scroll', onScroll, { passive: true });
+		window.addEventListener('resize', onScroll);
+	})();
+</script>
+
