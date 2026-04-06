@@ -2,11 +2,13 @@
 import Base from '../layouts/Base.astro';
 import BrainMap from '../components/BrainMap.astro';
 
+export const prerender = true;
+
 const title = 'Daniel Smidstrup — Co-founder & CTO at Userlink';
 const description =
-	'Daniel Smidstrup is the Co-founder & CTO at Userlink. A small, fast “window into my brain”: what I’m building, what I believe, and what I’m obsessed with.';
+	`Daniel Smidstrup is the Co-founder & CTO at Userlink and maker of SEOlint.dev — automated SEO linting for developers. A window into my brain: what I\u2019m building, what I believe, and what I\u2019m obsessed with.`;
 ---
 
-<Base title={title} description={description}>
+<Base title={title} description={description} showNav={true}>
 	<BrainMap />
 </Base>

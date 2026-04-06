@@ -1,0 +1,50 @@
+---
+import Base from '../../../layouts/Base.astro';
+import { isAdmin, setAdminCookie } from '../../../lib/auth';
+
+if (isAdmin(Astro.request)) {
+	return Astro.redirect('/freelance/admin');
+}
+
+let error = false;
+
+if (Astro.request.method === 'POST') {
+	const data = await Astro.request.formData();
+	const password = data.get('password')?.toString() ?? '';
+	const cookie = setAdminCookie(password);
+	if (cookie) {
+		return new Response(null, {
+			status: 302,
+			headers: { Location: '/freelance/admin', 'Set-Cookie': cookie },
+		});
+	}
+	error = true;
+}
+---
+
+<Base title="Admin Login — Daniel Smidstrup" description="Freelance admin portal">
+	<div class="flex min-h-screen items-center justify-center px-4">
+		<div class="w-full max-w-[340px]">
+			<a href="/" class="fl-link" style="display:inline-block;margin-bottom:16px;">← Daniel Smidstrup</a>
+			<div class="card p-8">
+			<p class="fl-label" style="margin:0 0 8px;">Admin Portal</p>
+			<h1 class="fl-heading" style="margin:0 0 24px;">Sign in</h1>
+
+			<form method="POST" style="display:flex;flex-direction:column;gap:12px;">
+				<input
+					name="password"
+					type="password"
+					placeholder="Password"
+					autocomplete="current-password"
+					required
+					class="field"
+				/>
+				{error && <p style="font-size:13px;color:#f87171;margin:0;">Incorrect password.</p>}
+				<button type="submit" class="btn-primary" style="width:100%;justify-content:center;margin-top:4px;">
+					Sign in →
+				</button>
+			</form>
+			</div>
+		</div>
+	</div>
+</Base>

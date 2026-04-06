@@ -31,7 +31,7 @@ const steps: Step[] = [
 	},
 	{
 		title: 'Problems',
-		body: 'I’m fascinated by problems: behavior, systems, incentives, and data.',
+		body: "I’m fascinated by problems: behavior, systems, incentives, and data.",
 	},
 	{
 		title: 'Userlink',
@@ -42,8 +42,12 @@ const steps: Step[] = [
 		body: 'As CTO I design teams and systems: interfaces, ownership, and operational calm.',
 	},
 	{
+		title: 'SEOlint.dev',
+		body: 'My micro-SaaS: automated SEO linting that catches real issues before they cost you rankings.',
+	},
+	{
 		title: 'Next',
-		body: 'Want to see what we’re building? Check out Userlink — or DM me on LinkedIn.',
+		body: "Want to collaborate? Check out SEOlint.dev, see what we're building at Userlink — or reach out directly.",
 	},
 ];
 
@@ -107,6 +111,14 @@ const nodes: Node[] = [
 	{ id: 'chatbots', label: 'Chatbots', theta: 78, phi: 130, tone: 'ai' },
 	{ id: 'human_ai', label: 'Human–AI', theta: 110, phi: 52 },
 	{ id: 'data_analysis', label: 'Data analysis', theta: 60, phi: 64, tone: 'ai' },
+	{
+		id: 'seolint',
+		label: 'SEOlint.dev',
+		kind: 'primary',
+		href: 'https://seolint.dev/',
+		theta: 160,
+		phi: 72,
+	},
 ];
 
 type Edge = { from: string; to: string; strength?: 'strong' | 'soft' };
@@ -148,6 +160,9 @@ const edges: Edge[] = [
 	{ from: 'tools', to: 'experiments', strength: 'soft' },
 	{ from: 'chatbots', to: 'human_ai', strength: 'soft' },
 	{ from: 'linkedin', to: 'userlink', strength: 'soft' },
+	{ from: 'daniel', to: 'seolint', strength: 'strong' },
+	{ from: 'seolint', to: 'software', strength: 'soft' },
+	{ from: 'seolint', to: 'growth', strength: 'soft' },
 	{ from: 'human_ai', to: 'ai', strength: 'soft' },
 	{ from: 'human_ai', to: 'management', strength: 'soft' },
 	{ from: 'data_analysis', to: 'math', strength: 'soft' },
@@ -168,7 +183,7 @@ const edges: Edge[] = [
 			inset: 0;
 		}
 
-		/* Minimal “smart” labels: only shown for focus + neighbors. */
+		/* Minimal "smart" labels: only shown for focus + neighbors. */
 		[data-node][data-show-label='1']::after,
 		[data-node]:hover::after {
 			content: attr(data-label);
@@ -190,7 +205,7 @@ const edges: Edge[] = [
 			pointer-events: none;
 		}
 
-		/* Hover glow centered on the dot (so it never looks “offset”). */
+		/* Hover glow centered on the dot (so it never looks "offset"). */
 		[data-node] {
 			cursor: pointer !important;
 			--node-glow: rgba(255, 255, 255, 0.22);
@@ -262,10 +277,12 @@ const edges: Edge[] = [
 			position: absolute;
 			left: 50%;
 			top: 74%;
+			z-index: 25; /* above headlayer (z-20) so card content is never obscured */
 			transform: translate(-50%, -50%);
 			width: min(440px, calc(100vw - 28px));
 			pointer-events: auto;
-			transition: transform 200ms cubic-bezier(0.2, 1, 0.2, 1);
+			opacity: 0; /* hidden until JS places it correctly (prevents jump on load) */
+			transition: opacity 180ms ease, transform 200ms cubic-bezier(0.2, 1, 0.2, 1);
 		}
 
 		@media (max-width: 900px) {
@@ -304,7 +321,7 @@ const edges: Edge[] = [
 		.nodeChatBubble {
 			max-width: 100%;
 			opacity: 0;
-			/* Always “write in” left → right */
+			/* Always "write in" left → right */
 			--jx: 0px;
 			--jy: 0px;
 			transform: translateY(calc(-6px + var(--jy))) translateX(calc(-10px + var(--jx)));
@@ -475,10 +492,10 @@ const edges: Edge[] = [
 				<div id="brainmap-stage">
 					<div class="pointer-events-none absolute inset-0 opacity-70">
 						<div class="absolute inset-0 bg-[radial-gradient(900px_620px_at_50%_10%,rgba(255,255,255,0.07),transparent_60%)]"></div>
-						<div class="absolute inset-0 bg-[radial-gradient(900px_700px_at_50%_110%,rgba(0,0,0,0.55),transparent_60%)]"></div>
+						<div id="brainmap-vignette-dark" class="absolute inset-0 bg-[radial-gradient(900px_700px_at_50%_110%,rgba(0,0,0,0.55),transparent_60%)]"></div>
 					</div>
 
-					<!-- Brain layer (reveals as the head “opens”, then zooms in) -->
+					<!-- Brain layer (reveals as the head "opens", then zooms in) -->
 					<div
 						id="brainmap-brainlayer"
 						class="absolute inset-0 origin-center will-change-transform"
@@ -563,25 +580,32 @@ const edges: Edge[] = [
 						class="pointer-events-none absolute left-1/2 top-[40%] z-20 -translate-x-1/2 -translate-y-1/2 will-change-transform"
 					>
 						<div class="relative">
-							<div class="absolute -inset-4 rounded-[44px] bg-[conic-gradient(from_180deg_at_50%_50%,hsla(var(--accent-hue),95%,70%,0.26),transparent_28%,hsla(calc(var(--accent-hue)+90),95%,70%,0.22),transparent_64%)] blur-2xl"></div>
+							<div id="brainmap-head-glow" class="absolute -inset-4 rounded-[44px] bg-[conic-gradient(from_180deg_at_50%_50%,hsla(var(--accent-hue),95%,70%,0.26),transparent_28%,hsla(calc(var(--accent-hue)+90),95%,70%,0.22),transparent_64%)] blur-2xl"></div>
 
-						<!-- Top half “lid” -->
+						<!-- Top half "lid" -->
 						<img
 							id="brainmap-head-top"
-							class="absolute left-1/2 top-1/2 w-[clamp(220px,34vw,380px)] -translate-x-1/2 -translate-y-1/2 select-none object-contain [clip-path:polygon(0_0,100%_0,100%_48%,92%_47%,84%_49%,76%_47%,68%_49%,60%_47%,52%_49%,44%_47%,36%_49%,28%_47%,20%_49%,12%_47%,0_48%)] [filter:drop-shadow(0_26px_50px_rgba(0,0,0,0.65))]"
+							class="absolute left-1/2 top-1/2 w-[clamp(220px,34vw,380px)] -translate-x-1/2 -translate-y-1/2 select-none object-contain [clip-path:polygon(0_0,100%_0,100%_48%,92%_47%,84%_49%,76%_47%,68%_49%,60%_47%,52%_49%,44%_47%,36%_49%,28%_47%,20%_49%,12%_47%,0_48%)]"
+							style="filter: drop-shadow(0 26px 50px rgba(0,0,0,0.65));"
 							src="/headshot.png"
 							alt=""
 							aria-hidden="true"
+							width="512"
+							height="512"
+							loading="eager"
 							decoding="async"
+							fetchpriority="high"
 						/>
-							<!-- Bottom half “base” -->
+							<!-- Bottom half "base" -->
 							<img
 								id="brainmap-head-bottom"
-								class="relative w-[clamp(220px,34vw,380px)] select-none object-contain [clip-path:polygon(0_48%,12%_47%,20%_49%,28%_47%,36%_49%,44%_47%,52%_49%,60%_47%,68%_49%,76%_47%,84%_49%,92%_47%,100%_48%,100%_100%,0_100%)] [filter:drop-shadow(0_26px_50px_rgba(0,0,0,0.65))]"
+								class="relative w-[clamp(220px,34vw,380px)] select-none object-contain [clip-path:polygon(0_48%,12%_47%,20%_49%,28%_47%,36%_49%,44%_47%,52%_49%,60%_47%,68%_49%,76%_47%,84%_49%,92%_47%,100%_48%,100%_100%,0_100%)]"
+								style="filter: drop-shadow(0 26px 50px rgba(0,0,0,0.65));"
 								src="/headshot.png"
-								alt="Daniel Smidstrup"
-								width="420"
-								height="420"
+								alt=""
+								aria-hidden="true"
+								width="512"
+								height="512"
 								loading="eager"
 								decoding="async"
 								fetchpriority="high"
@@ -618,7 +642,7 @@ const edges: Edge[] = [
 								<span id="brainmap-body">{steps[0].body}</span><span class="cursor" aria-hidden="true"></span>
 							</div>
 						</div>
-						<div class="mt-4 flex flex-wrap items-center gap-2">
+						<div id="brainmap-ctas" class="mt-4 flex flex-wrap items-center gap-2" style="transition:opacity 200ms ease,transform 200ms ease,max-height 250ms ease;overflow:hidden;max-height:120px;">
 							<a
 								id="brainmap-cta-linkedin"
 								class="relative inline-flex items-center justify-center rounded-full border border-white/14 bg-white/5 px-3 py-2 text-sm font-medium text-white/90 transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
@@ -627,6 +651,22 @@ const edges: Edge[] = [
 								target="_blank"
 							>
 								LinkedIn DM
+							</a>
+							<a
+								id="brainmap-cta-email"
+								class="relative inline-flex items-center justify-center rounded-full border border-white/14 bg-white/5 px-3 py-2 text-sm font-medium text-white/90 transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+								href="/freelance"
+							>
+								Get in touch
+							</a>
+							<a
+								id="brainmap-cta-seolint"
+								class="relative inline-flex items-center justify-center rounded-full border border-white/14 bg-white/5 px-3 py-2 text-sm font-medium text-white/90 transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+								href="https://seolint.dev/"
+								rel="noopener noreferrer"
+								target="_blank"
+							>
+								SEOlint.dev
 							</a>
 							<a
 								id="brainmap-cta-userlink"
@@ -645,7 +685,9 @@ const edges: Edge[] = [
 				<div class="sr-only" aria-hidden="false">
 					<p>
 					Daniel Smidstrup is the Co-founder & CTO at{' '}
-					<a href="https://userlink.ai/" target="_blank" rel="noopener noreferrer">Userlink</a>. Connect on{' '}
+					<a href="https://userlink.ai/" target="_blank" rel="noopener noreferrer">Userlink</a>, and the maker of{' '}
+					<a href="https://seolint.dev/" target="_blank" rel="noopener noreferrer">SEOlint.dev</a>. Open to freelance work — reach out at{' '}
+					<a href="mailto:daniel@danielsmidstrup.com">daniel@danielsmidstrup.com</a> or connect on{' '}
 					<a href="https://www.linkedin.com/in/daniel-smidstrup-b98390226/" target="_blank" rel="noopener noreferrer">LinkedIn</a>.
 					</p>
 					<ol>
@@ -665,7 +707,7 @@ const edges: Edge[] = [
 	(() => {
 		const reduceMotion =
 			window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-		// Still allow navigation/copy updates; we just avoid “typing” effects below.
+		// Still allow navigation/copy updates; we just avoid "typing" effects below.
 
 		const root = document.getElementById('brainmap');
 		const viewport = document.getElementById('brainmap-viewport');
@@ -682,7 +724,7 @@ const edges: Edge[] = [
 		const nodeChatLeft = document.getElementById('brainmap-nodechat-left');
 		const nodeChatRight = document.getElementById('brainmap-nodechat-right');
 
-		// Arrows are optional (don’t break scroll-driven updates if DOM is stale).
+		// Arrows are optional (don't break scroll-driven updates if DOM is stale).
 		if (!root || !viewport || !stageEl || !titleEl || !bodyEl || !linesSvg || !phaseCard || !chatEl || !stepMetaEl || !popLayer || !nodeChatLeft || !nodeChatRight) return;
 
 		const stepCount = Number(root.getAttribute('data-step-count') || '1');
@@ -711,7 +753,7 @@ const edges: Edge[] = [
 				title: 'Daniel',
 				body: 'A scrollable snapshot of me — trying a new perspective on a personal webpage.',
 				messages: [
-					{ role: 'ai', text: 'This is Daniel’s page — a process, not a CV.' },
+					{ role: 'ai', text: "This is Daniel’s page — a process, not a CV." },
 					{ role: 'ai', text: 'Scroll to move through my timeline (and click nodes for side notes).' },
 				],
 			},
@@ -757,17 +799,17 @@ const edges: Edge[] = [
 			},
 			{
 				title: 'Problems',
-				body: 'I’m fascinated by problems: behavior, systems, incentives, and data.',
+				body: "I’m fascinated by problems: behavior, systems, incentives, and data.",
 				messages: [
-					{ role: 'ai', text: 'I’m drawn to hard problems with steep learning curves.' },
-					{ role: 'ai', text: 'If it’s uncomfortable to learn, it’s probably worth learning.' },
+					{ role: 'ai', text: "I’m drawn to hard problems with steep learning curves." },
+					{ role: 'ai', text: "If it’s uncomfortable to learn, it’s probably worth learning." },
 				],
 			},
 			{
 				title: 'Userlink',
 				body: 'At Userlink we build AI-native workflows that turn interest into action.',
 				messages: [
-					{ role: 'ai', text: 'Main output: what I’m building at Userlink.' },
+					{ role: 'ai', text: "Main output: what I’m building at Userlink." },
 					{ role: 'ai', text: 'AI-native workflows that turn interest into action.' },
 				],
 			},
@@ -780,17 +822,25 @@ const edges: Edge[] = [
 				],
 			},
 			{
-				title: 'Next',
-				body: 'Want to see what we’re building? Check out Userlink — or DM me on LinkedIn.',
+				title: 'SEOlint.dev',
+				body: 'My micro-SaaS: automated SEO linting that catches real issues before they cost you rankings.',
 				messages: [
-					{ role: 'ai', text: 'If this sparked something, here’s the next step:' },
-					{ role: 'ai', text: 'Check out Userlink, or hit me up on LinkedIn.' },
+					{ role: 'ai', text: 'Side project: SEOlint.dev.' },
+					{ role: 'ai', text: 'Automated SEO linting — catches issues before they hurt your rankings.' },
+				],
+			},
+			{
+				title: 'Next',
+				body: "Want to collaborate? Check out SEOlint.dev, see what we're building at Userlink — or reach out directly.",
+				messages: [
+					{ role: 'ai', text: 'Open to freelance work and interesting problems.' },
+					{ role: 'ai', text: 'Reach out via LinkedIn or drop me an email.' },
 				],
 			},
 		];
 
 		let typingTimer = 0;
-		// Node chat bubbles type independently (don’t interfere with narrator typing).
+		// Node chat bubbles type independently (don't interfere with narrator typing).
 		const clearTyping = () => {
 			if (typingTimer) window.clearTimeout(typingTimer);
 			typingTimer = 0;
@@ -856,6 +906,22 @@ const edges: Edge[] = [
 
 			// Keep bodyEl in sync for SEO-ish fallback text inside the card.
 			bodyEl.textContent = step.body;
+
+			// Show CTA buttons only on the first step.
+			const ctasEl = document.getElementById('brainmap-ctas');
+			if (ctasEl) {
+				if (safe === 0) {
+					ctasEl.style.opacity = '1';
+					ctasEl.style.pointerEvents = 'auto';
+					ctasEl.style.transform = 'translateY(0)';
+					ctasEl.style.maxHeight = '120px';
+				} else {
+					ctasEl.style.opacity = '0';
+					ctasEl.style.pointerEvents = 'none';
+					ctasEl.style.transform = 'translateY(4px)';
+					ctasEl.style.maxHeight = '0';
+				}
+			}
 		};
 
 		const nodePopCopy = {
@@ -877,11 +943,11 @@ const edges: Edge[] = [
 			],
 			meaning: [
 				'Meaning: build things that matter, not just things that ship.',
-				'Taste + purpose is a better filter than “more features”.',
+				'Taste + purpose is a better filter than "more features".',
 			],
 			hustle: [
 				'Hustle is energy, but direction is everything.',
-				'Speed is only useful when you’re learning the right thing.',
+				"Speed is only useful when you’re learning the right thing.",
 			],
 			startup: [
 				'Constraints create signal. Speed creates learning.',
@@ -922,7 +988,7 @@ const edges: Edge[] = [
 			],
 			experiments: [
 				'Experiments are how ideas become knowledge.',
-				'Ship small, measure, iterate. Repeat until it’s “obvious in hindsight”.',
+				"Ship small, measure, iterate. Repeat until it’s obvious in hindsight.",
 			],
 			userlink: [
 				'Userlink: practical AI that shows up in real workflows.',
@@ -939,7 +1005,7 @@ const edges: Edge[] = [
 			],
 			organization: [
 				'Organization is how teams keep promises to each other.',
-				'Interfaces aren’t just APIs — they’re people and processes too.',
+				"Interfaces aren’t just APIs — they’re people and processes too.",
 			],
 			growth: [
 				'Growth is distribution + retention + timing.',
@@ -951,7 +1017,7 @@ const edges: Edge[] = [
 			],
 			writing: [
 				'Writing is how I compress ideas.',
-				'If I can’t explain it simply, I don’t understand it yet.',
+				"If I can’t explain it simply, I don’t understand it yet.",
 			],
 			network: [
 				'Network is trust over time.',
@@ -1089,6 +1155,18 @@ const edges: Edge[] = [
 			});
 		}
 
+		// Arrow key navigation
+		window.addEventListener('keydown', (e) => {
+			if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+			if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+				e.preventDefault();
+				scrollToStep(getActiveStepFromScroll() + 1);
+			} else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+				e.preventDefault();
+				scrollToStep(getActiveStepFromScroll() - 1);
+			}
+		});
+
 		const headLayer = document.getElementById('brainmap-headlayer');
 		const headTop = document.getElementById('brainmap-head-top');
 		const headBottom = document.getElementById('brainmap-head-bottom');
@@ -1099,7 +1177,7 @@ const edges: Edge[] = [
 		const ctaUserlink = document.getElementById('brainmap-cta-userlink');
 
 		const positions = new Map(); // nodeId -> {x,y,depth} in viewport px
-		const appear = new Map(); // nodeId -> 0..1 (for “learning” intro)
+		const appear = new Map(); // nodeId -> 0..1 (for "learning" intro)
 		const neighbors = new Map();
 		for (const line of edges) {
 			const from = line.getAttribute('data-from');
@@ -1123,14 +1201,14 @@ const edges: Edge[] = [
 				line.setAttribute('x2', String(b.x));
 				line.setAttribute('y2', String(b.y));
 
-				// “Smarter” emphasis: highlight focus cluster connections.
+				// "Smarter" emphasis: highlight focus cluster connections.
 				const isFocusEdge = from === focusId || to === focusId;
 				const isNearEdge =
 					(nearSet && from && nearSet.has(from)) || (nearSet && to && nearSet.has(to));
 
 				const baseOpacity = isFocusEdge ? 0.55 : isNearEdge ? 0.26 : 0.1;
 
-				// “Learning” draw-in: only draw edges once endpoints appear.
+				// "Learning" draw-in: only draw edges once endpoints appear.
 				const af = from ? appear.get(from) ?? 1 : 1;
 				const at = to ? appear.get(to) ?? 1 : 1;
 				const draw = Math.min(af, at);
@@ -1181,7 +1259,7 @@ const edges: Edge[] = [
 
 		let lastCardStep = -1;
 		const jitterForStep = (n) => {
-			// Deterministic “random” from step index (no Math.random).
+			// Deterministic "random" from step index (no Math.random).
 			const a = Math.sin((n + 1) * 999.7) * 10000;
 			const b = Math.sin((n + 1) * 1337.3) * 10000;
 			const c = Math.sin((n + 1) * 777.1) * 10000;
@@ -1204,10 +1282,10 @@ const edges: Edge[] = [
 			// Phase timing (fast):
 			// - open: quick lid lift
 			// - headOut: head + stickers disappear almost fully
-			// (brain network stays centered; only the brain sticker “walks out”)
+			// (brain network stays centered; only the brain sticker "walks out")
 			const open = clamp01((progress - 0.02) / 0.10);
 			const headOut = clamp01((progress - 0.12) / 0.10);
-			// Slow down the “learning” reveal.
+			// Slow down the "learning" reveal.
 			const learn = clamp01((progress - 0.32) / 0.22);
 
 			// Story progression: slide changes only at thresholds.
@@ -1218,7 +1296,7 @@ const edges: Edge[] = [
 
 			// Head transforms
 			if (headLayer) {
-				// Quick “zoom into face”, then vanish before brain reveals.
+				// Quick "zoom into face", then vanish before brain reveals.
 				const zoomFace = clamp01((progress - 0.06) / 0.08);
 				const headScale = 1 + zoomFace * 0.9 + headOut * 1.6;
 				const headFade = 1 - headOut;
@@ -1284,7 +1362,7 @@ const edges: Edge[] = [
 			const cy = vr.height / 2;
 			const r = Math.min(vr.width, vr.height) * 0.34;
 
-			// Rotate the sphere with scroll (societies.io-like “clock” feel).
+			// Rotate the sphere with scroll (societies.io-like "clock" feel).
 			// Slower rotation so it feels readable.
 			const rotY = storyProgress * Math.PI * 1.35;
 			const rotX = -0.55 + Math.sin(storyProgress * Math.PI * 2) * 0.10;
@@ -1332,7 +1410,7 @@ const edges: Edge[] = [
 			}
 
 			// Focus cluster per step (story).
-			// activeStep is computed earlier as a step-based “slide”.
+			// activeStep is computed earlier as a step-based "slide".
 			const focusByStep = [
 				'daniel',
 				'software',
@@ -1476,8 +1554,16 @@ const edges: Edge[] = [
 			raf = requestAnimationFrame(update);
 		};
 
-		// Initial layout
+		// Initial layout — run once, then reveal card to avoid the CSS→JS position jump
 		update();
+		if (phaseCard) phaseCard.style.opacity = '1';
+
+		// Re-layout when headshot finishes loading (dimensions not known until then)
+		const headImg = document.getElementById('brainmap-head-bottom');
+		if (headImg && !(headImg as HTMLImageElement).complete) {
+			headImg.addEventListener('load', () => { update(); }, { once: true });
+		}
+
 		window.addEventListener('scroll', onScroll, { passive: true });
 		window.addEventListener('resize', onScroll);
 	})();

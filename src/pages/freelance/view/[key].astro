@@ -1,0 +1,304 @@
+---
+import Base from '../../../layouts/Base.astro';
+import { supabase } from '../../../lib/supabase';
+
+const { key } = Astro.params;
+
+const { data: project } = await supabase
+	.from('projects')
+	.select('*')
+	.eq('share_key', key)
+	.single();
+
+if (!project) return Astro.redirect('/freelance');
+
+// Remember this client so /freelance auto-redirects them next time.
+// Set a 90-day cookie if they don't already have the right one.
+const existingCookie = Astro.request.headers.get('cookie') ?? '';
+const existingFkey = Object.fromEntries(
+	existingCookie.split(';').map((c) => c.trim().split('=').map(decodeURIComponent))
+)['fkey'];
+const setCookie = existingFkey !== key
+	? `fkey=${key}; Path=/; SameSite=Lax; Max-Age=7776000`
+	: null;
+
+if (setCookie) Astro.response.headers.set('Set-Cookie', setCookie);
+
+const status: string = project.status ?? 'offer';
+const isOffer = status === 'offer';
+
+const title       = project.display_title || project.name;
+const deliverables: string[] = Array.isArray(project.deliverables) ? project.deliverables : [];
+
+// Board-mode data (only fetched when not offer)
+type Label = { id: string; name: string; color: string };
+type Task  = { id: string; title: string; description: string | null; status: 'todo' | 'doing' | 'done'; created_at: string; task_labels: { label_id: string }[] };
+type Group = { id: string; name: string; tasks: Task[] };
+let groups: Group[] = [];
+let labelMap = new Map<string, Label>();
+let totalTasks = 0;
+let doneTasks  = 0;
+let pct        = 0;
+
+if (!isOffer) {
+	const [{ data: rawGroups }, { data: projectLabels }] = await Promise.all([
+		supabase
+			.from('task_groups')
+			.select('*, tasks(*, task_labels(label_id))')
+			.eq('project_id', project.id)
+			.order('created_at', { ascending: true }),
+		supabase
+			.from('labels')
+			.select('*')
+			.eq('project_id', project.id),
+	]);
+
+	labelMap = new Map((projectLabels ?? []).map((l: Label) => [l.id, l]));
+
+	groups = (rawGroups ?? []).map((g) => ({
+		...g,
+		tasks: (g.tasks ?? []).sort((a: Task, b: Task) =>
+			new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime()
+		),
+	}));
+
+	totalTasks = groups.reduce((n, g) => n + g.tasks.length, 0);
+	doneTasks  = groups.reduce((n, g) => n + g.tasks.filter((t) => t.status === 'done').length, 0);
+	pct        = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
+}
+
+const pageTitle = isOffer
+	? `Proposal for ${project.client_name} — Daniel Smidstrup`
+	: `${title} — Live Progress`;
+
+const pageDesc = isOffer
+	? `A freelance proposal from Daniel Smidstrup for ${project.client_name}.`
+	: `Live project board for ${project.client_name} × Daniel Smidstrup.`;
+---
+
+<Base title={pageTitle} description={pageDesc}>
+<div class="mx-auto max-w-2xl px-4 py-14">
+
+{isOffer ? (
+	/* ════════════════════════════════════════════════
+	   OFFER VIEW
+	════════════════════════════════════════════════ */
+	<>
+		<!-- From / to header -->
+		<div class="mb-10">
+			<div class="mb-6 flex items-center gap-3 text-xs text-white/65">
+				<span>Daniel Smidstrup</span>
+				<span class="text-white/15">→</span>
+				<span>{project.client_name}</span>
+			</div>
+
+			<p class="text-xs font-medium uppercase tracking-widest text-white/65">Proposal</p>
+			<h1 class="mt-2 text-3xl font-semibold tracking-tight text-white leading-tight">
+				{title}
+			</h1>
+
+			{project.description && (
+				<p class="mt-3 text-sm text-white/65">{project.description}</p>
+			)}
+
+			<!-- Timeline + price badges -->
+			{(project.timeline || project.price) && (
+				<div class="mt-5 flex flex-wrap gap-2">
+					{project.timeline && (
+						<span class="rounded-full border border-white/12 bg-white/5 px-3 py-1.5 text-xs text-white/55">
+							⏱ {project.timeline}
+						</span>
+					)}
+					{project.price && (
+						<span class="rounded-full border border-white/12 bg-white/5 px-3 py-1.5 text-xs text-white/55">
+							💶 {project.price}
+						</span>
+					)}
+				</div>
+			)}
+		</div>
+
+		<!-- Offer summary -->
+		{project.offer_summary && (
+			<div class="card mb-8 p-6">
+				<p class="text-xs font-semibold uppercase tracking-widest text-white/65 mb-3">Scope &amp; approach</p>
+				<p class="text-sm text-white/65 leading-relaxed whitespace-pre-line">{project.offer_summary}</p>
+			</div>
+		)}
+
+		<!-- Deliverables -->
+		{deliverables.length > 0 && (
+			<div class="mb-8 flex flex-col gap-2">
+				{deliverables.map((item, i) => (
+					<div class="card flex items-center gap-4 px-5 py-3.5">
+						<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-400/10 text-[11px] font-semibold text-emerald-400/70">
+							{i + 1}
+						</span>
+						<span class="text-sm text-white/80 leading-snug">{item}</span>
+					</div>
+				))}
+			</div>
+		)}
+
+		<!-- CTA -->
+		<div class="card p-6">
+			<p class="text-sm text-white/55 leading-relaxed">
+				Questions, changes, or ready to kick things off? Reach out directly.
+			</p>
+			<div class="mt-5 flex flex-wrap gap-3">
+				<a
+					href="mailto:daniel@danielsmidstrup.com"
+					class="inline-flex items-center rounded-full border border-white/14 bg-white/8 px-4 py-2.5 text-sm font-medium text-white/90 transition hover:bg-white/14"
+				>
+					Email Daniel
+				</a>
+				<a
+					href="https://www.linkedin.com/in/daniel-smidstrup-b98390226/"
+					target="_blank"
+					rel="noopener noreferrer"
+					class="inline-flex items-center rounded-full border border-white/12 bg-white/5 px-4 py-2.5 text-sm text-white/55 transition hover:text-white/80"
+				>
+					LinkedIn
+				</a>
+			</div>
+		</div>
+	</>
+) : (
+	/* ════════════════════════════════════════════════
+	   ACTIVE / COMPLETED BOARD VIEW
+	════════════════════════════════════════════════ */
+	<>
+		<!-- Header -->
+		<div class="mb-10">
+			<div class="mb-2 flex items-center gap-2">
+				<p class="text-xs font-medium uppercase tracking-widest text-white/55">Live Progress</p>
+				{status === 'completed' && (
+					<span class="rounded-full border border-emerald-400/25 bg-emerald-400/8 px-2.5 py-0.5 text-[11px] text-emerald-400/70">
+						Completed
+					</span>
+				)}
+			</div>
+			<h1 class="text-3xl font-semibold tracking-tight text-white">{title}</h1>
+			{project.description && (
+				<p class="mt-2 text-sm text-white/65">{project.description}</p>
+			)}
+
+			<!-- Progress bar — only shown once work has started -->
+			{doneTasks > 0 && (
+				<div class="mt-6">
+					<div class="mb-1.5 flex items-center justify-between text-xs text-white/55">
+						<span>{doneTasks} task{doneTasks !== 1 ? 's' : ''} completed</span>
+						<span class="text-emerald-400/70">{pct}%</span>
+					</div>
+					<div class="h-1.5 w-full rounded-full bg-white/8">
+						<div
+							class="h-full rounded-full bg-gradient-to-r from-emerald-400/60 to-emerald-400/40 transition-all"
+							style={`width: ${pct}%`}
+						/>
+					</div>
+				</div>
+			)}
+		</div>
+
+		<!-- Groups / milestones -->
+		{groups.length === 0 && (
+			<div class="card p-10 text-center">
+				<p class="text-sm text-white/65">Work is being planned — check back soon.</p>
+			</div>
+		)}
+
+		<div class="flex flex-col gap-5">
+			{groups.map((group) => {
+				const doneTasks  = group.tasks.filter((t) => t.status === 'done');
+				const doingTasks = group.tasks.filter((t) => t.status === 'doing');
+				const groupTotal = group.tasks.length;
+				const groupDone  = doneTasks.length;
+				const allDone    = groupTotal > 0 && groupDone === groupTotal;
+				const hasActive  = doingTasks.length > 0;
+
+				return (
+					<div class="card p-5">
+						<!-- Group header with milestone status -->
+						<div class="mb-4 flex items-center justify-between gap-3">
+							<div class="flex items-center gap-2.5">
+								<span class={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] ${
+									allDone
+										? 'bg-emerald-400/15 text-emerald-400/80'
+										: hasActive
+											? 'bg-amber-300/12 text-amber-300/70'
+											: 'bg-white/6 text-white/30'
+								}`}>
+									{allDone ? '✓' : hasActive ? '·' : '○'}
+								</span>
+								<h2 class="text-sm font-semibold text-white/75">{group.name}</h2>
+							</div>
+							{groupTotal > 0 && (
+								<span class={`text-xs ${allDone ? 'text-emerald-400/60' : 'text-white/35'}`}>
+									{groupDone}/{groupTotal} done
+								</span>
+							)}
+						</div>
+
+						<!-- Active tasks (in progress) -->
+						{doingTasks.length > 0 && (
+							<div class="mb-3">
+								<p class="mb-2 text-[11px] font-semibold uppercase tracking-wider text-amber-300/60">In progress</p>
+								<div class="flex flex-col gap-2">
+									{doingTasks.map((task) => {
+										const tLabels = (task.task_labels ?? [])
+											.map((tl) => labelMap.get(tl.label_id))
+											.filter(Boolean) as Label[];
+										return (
+											<div class="rounded-xl border border-amber-300/15 bg-amber-300/4 p-3">
+												<p class="text-sm text-white/80 leading-snug">{task.title}</p>
+												{task.description && (
+													<p class="mt-1 text-xs text-white/40 leading-snug">{task.description}</p>
+												)}
+												{tLabels.length > 0 && (
+													<div class="mt-2 flex flex-wrap gap-1.5">
+														{tLabels.map((l) => (
+															<span
+																class="inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[11px] leading-none"
+																style={`border-color:${l.color}40;background:${l.color}15;color:${l.color}`}
+															>
+																<span class="h-1.5 w-1.5 rounded-full" style={`background:${l.color}`} />
+																{l.name}
+															</span>
+														))}
+													</div>
+												)}
+											</div>
+										);
+									})}
+								</div>
+							</div>
+						)}
+
+						<!-- Completed tasks -->
+						{doneTasks.length > 0 && (
+							<div>
+								<p class="mb-2 text-[11px] font-semibold uppercase tracking-wider text-emerald-400/60">Completed</p>
+								<div class="flex flex-col gap-1.5">
+									{doneTasks.map((task) => (
+										<div class="flex items-start gap-2.5 rounded-xl border border-emerald-400/12 bg-emerald-400/4 px-3 py-2.5">
+											<span class="mt-0.5 shrink-0 text-[11px] text-emerald-400/60">✓</span>
+											<p class="text-sm text-white/65 leading-snug">{task.title}</p>
+										</div>
+									))}
+								</div>
+							</div>
+						)}
+
+						{groupTotal === 0 && (
+							<p class="text-xs text-white/25 italic">Planning in progress</p>
+						)}
+					</div>
+				);
+			})}
+		</div>
+
+	</>
+)}
+
+</div>
+</Base>
