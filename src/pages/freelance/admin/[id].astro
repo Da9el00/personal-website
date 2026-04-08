@@ -2,6 +2,17 @@
 import Base from '../../../layouts/Base.astro';
 import { isAdmin } from '../../../lib/auth';
 import { supabase } from '../../../lib/supabase';
+import {
+	normalizeOfferDoc,
+	exportOfferDoc,
+	deriveItemStates,
+	deriveActualHours,
+	computeScopeTotals,
+	formatMoney,
+	sanitizeOfferJson,
+	type OfferDoc,
+	type OfferEvent,
+} from '../../../lib/offerDoc';
 
 if (!isAdmin(Astro.request)) {
 	return Astro.redirect('/freelance/admin/login');
@@ -9,87 +20,162 @@ if (!isAdmin(Astro.request)) {
 
 const { id } = Astro.params;
 
+let importError = '';
+
 // ── POST handler ────────────────────────────────────────────────────────────
 if (Astro.request.method === 'POST') {
 	const data   = await Astro.request.formData();
 	const action = data.get('_action')?.toString();
 
-	if (action === 'update-project') {
-		const display_title   = data.get('display_title')?.toString()?.trim() ?? '';
-		const client_name     = data.get('client_name')?.toString()?.trim() ?? '';
-		const description     = data.get('description')?.toString()?.trim() ?? '';
-		const offer_summary   = data.get('offer_summary')?.toString()?.trim() ?? '';
-		const timeline        = data.get('timeline')?.toString()?.trim() ?? '';
-		const price           = data.get('price')?.toString()?.trim() ?? '';
-		const rawDeliverables = data.get('deliverables')?.toString() ?? '';
-		const deliverables    = rawDeliverables.split('\n').map((l) => l.trim()).filter(Boolean);
-		await supabase.from('projects').update({
-			display_title: display_title || null,
-			client_name:   client_name   || undefined,
-			description:   description   || null,
-			offer_summary: offer_summary || null,
-			deliverables,
-			timeline:      timeline      || null,
-			price:         price         || null,
-		}).eq('id', id);
-
-	} else if (action === 'set-status') {
+	if (action === 'set-status') {
 		const status = data.get('status')?.toString() ?? '';
 		if (['offer', 'active', 'completed'].includes(status)) {
 			await supabase.from('projects').update({ status }).eq('id', id);
 		}
 
-	} else if (action === 'create-label') {
-		const name  = data.get('name')?.toString()?.trim() ?? '';
-		const color = data.get('color')?.toString() ?? '#6b7280';
-		if (name) await supabase.from('labels').insert({ project_id: id, name, color });
+	} else if (action === 'set-deadline') {
+		const deadline = (data.get('deadline')?.toString() ?? '').trim();
+		await supabase.from('projects').update({ deadline: deadline || null }).eq('id', id);
 
-	} else if (action === 'delete-label') {
-		const label_id = data.get('label_id')?.toString() ?? '';
-		if (label_id) await supabase.from('labels').delete().eq('id', label_id);
+	} else if (action === 'set-title') {
+		const newTitle = (data.get('title')?.toString() ?? '').trim();
+		if (newTitle) {
+			const updates: Record<string, any> = { display_title: newTitle };
+			// Also write back into the offer_doc JSON if there is one.
+			const { data: cur } = await supabase
+				.from('projects').select('offer_doc').eq('id', id).single();
+			const currentDoc = (cur?.offer_doc as OfferDoc | null) ?? null;
+			if (currentDoc) {
+				updates.offer_doc = { ...currentDoc, title: newTitle };
+			}
+			await supabase.from('projects').update(updates).eq('id', id);
+		}
 
-	} else if (action === 'toggle-label') {
-		const task_id  = data.get('task_id')?.toString() ?? '';
-		const label_id = data.get('label_id')?.toString() ?? '';
-		const assigned = data.get('assigned') === '1';
-		if (task_id && label_id) {
-			if (assigned) {
-				await supabase.from('task_labels').delete()
-					.eq('task_id', task_id).eq('label_id', label_id);
-			} else {
-				await supabase.from('task_labels').insert({ task_id, label_id });
+	} else if (action === 'set-stage') {
+		const stage = data.get('stage')?.toString() ?? '';
+		const map: Record<string, { status: string; offer_is_wip: boolean }> = {
+			wip_offer: { status: 'offer',     offer_is_wip: true  },
+			offer:     { status: 'offer',     offer_is_wip: false },
+			active:    { status: 'active',    offer_is_wip: false },
+			done:      { status: 'completed', offer_is_wip: false },
+		};
+		const upd = map[stage];
+		if (upd) await supabase.from('projects').update(upd).eq('id', id);
+
+	} else if (action === 'move-item') {
+		// Drag-and-drop on the work board: change progress and/or reorder.
+		const item_id = data.get('item_id')?.toString() ?? '';
+		const newProgress = data.get('progress')?.toString() ?? '';
+		const newIndexRaw = data.get('index')?.toString() ?? '';
+		const newIndex = parseInt(newIndexRaw, 10);
+
+		if (item_id && ['todo', 'doing', 'done'].includes(newProgress)) {
+			// 1. Reorder the offer_doc.scope.items array if needed.
+			const { data: cur } = await supabase
+				.from('projects').select('offer_doc').eq('id', id).single();
+			const docNow = (cur?.offer_doc as OfferDoc | null) ?? null;
+			if (docNow?.scope && Number.isFinite(newIndex)) {
+				const items = [...(docNow.scope.items ?? [])];
+				const fromIdx = items.findIndex((i) => i.id === item_id);
+				if (fromIdx !== -1) {
+					const [moved] = items.splice(fromIdx, 1);
+					const targetIdx = Math.max(0, Math.min(items.length, newIndex));
+					items.splice(targetIdx, 0, moved);
+					await supabase.from('projects').update({
+						offer_doc: { ...docNow, scope: { ...docNow.scope, items } },
+					}).eq('id', id);
+				}
+			}
+
+			// 2. Persist the new progress via the existing event log.
+			const { data: prior } = await supabase
+				.from('offer_events')
+				.select('payload')
+				.eq('project_id', id).eq('ref', item_id).eq('kind', 'item_progress')
+				.order('created_at', { ascending: false }).limit(1);
+			const before = prior?.[0]?.payload?.to ?? null;
+			if (newProgress !== before) {
+				await supabase.from('offer_events').insert({
+					project_id: id, actor: 'admin', kind: 'item_progress',
+					ref: item_id, payload: { from: before, to: newProgress },
+				});
 			}
 		}
 
-	} else if (action === 'add-group') {
-		const name = data.get('name')?.toString()?.trim() ?? '';
-		if (name) await supabase.from('task_groups').insert({ project_id: id, name });
-
-	} else if (action === 'add-task') {
-		const group_id    = data.get('group_id')?.toString() ?? '';
-		const title       = data.get('title')?.toString()?.trim() ?? '';
-		const description = data.get('description')?.toString()?.trim() ?? '';
-		if (group_id && title) {
-			await supabase.from('tasks').insert({ group_id, title, description: description || null });
+	} else if (action === 'set-actual-hours') {
+		const item_id = data.get('item_id')?.toString() ?? '';
+		const hoursRaw = data.get('hours')?.toString() ?? '';
+		const hours = parseFloat(hoursRaw.replace(',', '.'));
+		if (item_id && Number.isFinite(hours) && hours >= 0) {
+			await supabase.from('offer_events').insert({
+				project_id: id, actor: 'admin', kind: 'item_actual_hours',
+				ref: item_id, payload: { hours },
+			});
 		}
 
-	} else if (action === 'move-task') {
-		const task_id = data.get('task_id')?.toString() ?? '';
-		const status  = data.get('status')?.toString() ?? '';
-		if (task_id && ['todo', 'doing', 'done'].includes(status)) {
-			await supabase.from('tasks').update({ status }).eq('id', task_id);
+	} else if (action === 'set-item-progress') {
+		const item_id = data.get('item_id')?.toString() ?? '';
+		const next    = data.get('progress')?.toString() ?? '';
+		if (item_id && ['todo', 'doing', 'done'].includes(next)) {
+			// Look up the current progress so we can record before/after.
+			const { data: prior } = await supabase
+				.from('offer_events')
+				.select('payload')
+				.eq('project_id', id).eq('ref', item_id).eq('kind', 'item_progress')
+				.order('created_at', { ascending: false }).limit(1);
+			const before = prior?.[0]?.payload?.to ?? null;
+			if (next !== before) {
+				await supabase.from('offer_events').insert({
+					project_id: id, actor: 'admin', kind: 'item_progress',
+					ref: item_id, payload: { from: before, to: next },
+				});
+			}
 		}
 
-	} else if (action === 'delete-task') {
-		const task_id = data.get('task_id')?.toString() ?? '';
-		if (task_id) await supabase.from('tasks').delete().eq('id', task_id);
+	} else if (action === 'import-offer-doc') {
+		const raw = data.get('json')?.toString() ?? '';
+		try {
+			// Try strict parse first; if it fails on a control-char issue, sanitize and retry.
+			let parsed: unknown;
+			try {
+				parsed = JSON.parse(raw);
+			} catch (firstErr) {
+				parsed = JSON.parse(sanitizeOfferJson(raw));
+			}
+			const normalized = normalizeOfferDoc(parsed);
+			if (!normalized) throw new Error('Empty doc');
+			// Persist the doc — and pull title/client_name back to project columns
+			// so the admin index list can show them without re-parsing the JSON.
+			const projectUpdate: Record<string, any> = { offer_doc: normalized };
+			if (normalized.title)       projectUpdate.display_title = normalized.title;
+			if (normalized.client_name) projectUpdate.client_name   = normalized.client_name;
+			if (normalized.deadline)    projectUpdate.deadline      = normalized.deadline;
+			await supabase.from('projects').update(projectUpdate).eq('id', id);
+			await supabase.from('offer_events').insert({
+				project_id: id, actor: 'admin', kind: 'doc_replaced', ref: null, payload: {},
+			});
+		} catch (e) {
+			importError = (e as Error).message || 'Invalid JSON';
+			// Fall through without redirect so we can show the error inline.
+		}
 
-	} else if (action === 'delete-group') {
-		const group_id = data.get('group_id')?.toString() ?? '';
-		if (group_id) await supabase.from('task_groups').delete().eq('id', group_id);
+	} else if (action === 'clear-offer-doc') {
+		await supabase.from('projects').update({ offer_doc: null }).eq('id', id);
+
+	} else if (action === 'clear-activity') {
+		// Wipe all client interaction events; keep doc_replaced rows so the timeline
+		// of admin imports stays intact.
+		await supabase.from('offer_events')
+			.delete()
+			.eq('project_id', id)
+			.neq('kind', 'doc_replaced');
+
+	} else if (action === 'set-wip') {
+		const wip = data.get('wip') === '1';
+		await supabase.from('projects').update({ offer_is_wip: wip }).eq('id', id);
 	}
 
-	return Astro.redirect(`/freelance/admin/${id}`);
+	if (!importError) return Astro.redirect(`/freelance/admin/${id}`);
 }
 
 // ── Fetch ────────────────────────────────────────────────────────────────────
@@ -98,41 +184,109 @@ const { data: project } = await supabase
 
 if (!project) return Astro.redirect('/freelance/admin');
 
-const [{ data: rawGroups }, { data: projectLabels }] = await Promise.all([
-	supabase
-		.from('task_groups')
-		.select('*, tasks(*, task_labels(label_id))')
-		.eq('project_id', id)
-		.order('created_at', { ascending: true }),
-	supabase
-		.from('labels')
-		.select('*')
-		.eq('project_id', id)
-		.order('name', { ascending: true }),
-]);
+const { data: rawEvents } = await supabase
+	.from('offer_events')
+	.select('*')
+	.eq('project_id', id)
+	.order('created_at', { ascending: false })
+	.limit(200);
 
-type Label   = { id: string; name: string; color: string };
-type Task    = { id: string; title: string; description: string | null; status: 'todo' | 'doing' | 'done'; created_at: string; task_labels: { label_id: string }[] };
-type Group   = { id: string; name: string; tasks: Task[] };
+const offerDoc: OfferDoc | null = (project.offer_doc as OfferDoc | null) ?? null;
+const offerIsWip: boolean = project.offer_is_wip ?? true;
+const offerEvents: OfferEvent[] = (rawEvents ?? []) as OfferEvent[];
+const offerJson = exportOfferDoc(offerDoc);
+const itemStates = deriveItemStates(offerEvents);
+const actualHoursMap = deriveActualHours(offerEvents);
+const scopeTotals = offerDoc?.scope ? computeScopeTotals(offerDoc.scope, itemStates) : null;
 
-const labels: Label[] = projectLabels ?? [];
-const labelMap = new Map(labels.map((l) => [l.id, l]));
+// Build a map of item id -> { sectionTitle, itemText } for nicer event labels.
+const itemLookup = new Map<string, { sectionTitle: string; itemText: string }>();
+if (offerDoc) {
+	for (const sec of offerDoc.sections) {
+		for (const it of sec.items ?? []) {
+			itemLookup.set(it.id, { sectionTitle: sec.title, itemText: it.text });
+		}
+	}
+}
 
-const groups: Group[] = (rawGroups ?? []).map((g) => ({
-	...g,
-	tasks: (g.tasks ?? []).sort((a: Task, b: Task) =>
-		new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime()
-	),
-}));
+const STATUS_LABEL: Record<string, string> = {
+	do_now: 'Do now', later: 'Later', skip: 'Skip',
+};
+
+function eventSummary(ev: OfferEvent): string {
+	const item = ev.ref ? itemLookup.get(ev.ref) : null;
+	const itemHint = item ? `“${item.itemText.slice(0, 60)}${item.itemText.length > 60 ? '…' : ''}”` : '';
+	if (ev.kind === 'item_status') {
+		const to = ev.payload?.to ? STATUS_LABEL[ev.payload.to] ?? ev.payload.to : 'cleared';
+		return `marked ${itemHint} as ${to}`;
+	}
+	if (ev.kind === 'item_progress') {
+		const to = ev.payload?.to ?? 'cleared';
+		const label = to === 'todo' ? 'Todo' : to === 'doing' ? 'Doing' : to === 'done' ? 'Done' : to;
+		return `moved ${itemHint} to ${label}`;
+	}
+	if (ev.kind === 'item_note') {
+		const txt = (ev.payload?.after ?? '').toString().trim();
+		return txt ? `wrote a note on ${itemHint}: “${txt.slice(0, 80)}${txt.length > 80 ? '…' : ''}”` : `cleared note on ${itemHint}`;
+	}
+	if (ev.kind === 'comment') {
+		const txt = (ev.payload?.text ?? '').toString().trim();
+		return `commented: “${txt.slice(0, 100)}${txt.length > 100 ? '…' : ''}”`;
+	}
+	if (ev.kind === 'section_edit') {
+		const sec = offerDoc?.sections.find((s) => s.id === ev.ref);
+		const title = sec?.title ? `“${sec.title}”` : '';
+		return `edited section ${title}`.trim();
+	}
+	if (ev.kind === 'doc_replaced') return 'imported a new offer document';
+	return ev.kind;
+}
+
+function evTimeAgo(iso: string): string {
+	const diff = Date.now() - new Date(iso).getTime();
+	const m = Math.floor(diff / 60000);
+	if (m < 1) return 'just now';
+	if (m < 60) return `${m}m ago`;
+	const h = Math.floor(m / 60);
+	if (h < 24) return `${h}h ago`;
+	const d = Math.floor(h / 24);
+	return `${d}d ago`;
+}
 
 const siteUrl  = Astro.site ?? new URL(Astro.url.origin);
 const shareUrl = `${siteUrl}freelance/view/${project.share_key}`;
 
-const statusCols: { key: Task['status']; label: string; color: string; headerColor: string }[] = [
-	{ key: 'todo',  label: 'Todo',  color: 'border-white/10 bg-white/4',            headerColor: 'text-white/40'       },
-	{ key: 'doing', label: 'Doing', color: 'border-amber-300/20 bg-amber-300/5',    headerColor: 'text-amber-300/70'   },
-	{ key: 'done',  label: 'Done',  color: 'border-emerald-400/20 bg-emerald-400/5',headerColor: 'text-emerald-400/70' },
+type ProgressCol = { key: 'todo' | 'doing' | 'done'; label: string; color: string; headerColor: string };
+const progressCols: ProgressCol[] = [
+	{ key: 'todo',  label: 'Todo',  color: 'border-white/10 bg-white/4',             headerColor: 'text-white/40'       },
+	{ key: 'doing', label: 'Doing', color: 'border-amber-300/20 bg-amber-300/5',     headerColor: 'text-amber-300/70'   },
+	{ key: 'done',  label: 'Done',  color: 'border-emerald-400/20 bg-emerald-400/5', headerColor: 'text-emerald-400/70' },
 ];
+
+// Build the work board: every scope item the client hasn't excluded.
+type WorkItem = {
+	id: string;
+	text: string;
+	hours: number;
+	actualHours: number | null;
+	group: string | null;
+	clientStatus: 'do_now' | 'later' | 'skip' | null;
+	progress: 'todo' | 'doing' | 'done';
+};
+const workItems: WorkItem[] = ((offerDoc?.scope?.items) ?? [])
+	.map((it) => {
+		const st = itemStates.get(it.id);
+		return {
+			id: it.id,
+			text: it.text,
+			hours: it.hours || 0,
+			actualHours: actualHoursMap.has(it.id) ? actualHoursMap.get(it.id)! : null,
+			group: it.group ?? null,
+			clientStatus: (st?.status ?? null),
+			progress: (st?.progress ?? 'todo'),
+		} as WorkItem;
+	})
+	.filter((w) => w.clientStatus !== 'skip');
 
 const statusMeta: Record<string, { label: string; badge: string }> = {
 	offer:     { label: 'Offer',     badge: 'border-blue-400/25 bg-blue-400/8 text-blue-300/80'         },
@@ -140,41 +294,52 @@ const statusMeta: Record<string, { label: string; badge: string }> = {
 	completed: { label: 'Completed', badge: 'border-emerald-400/25 bg-emerald-400/8 text-emerald-400/80'},
 };
 
-const PRESET_COLORS = [
-	'#f87171','#fb923c','#facc15','#4ade80',
-	'#2dd4bf','#60a5fa','#c084fc','#f472b6','#94a3b8',
+type Stage = 'wip_offer' | 'offer' | 'active' | 'done';
+
+const STAGES: { key: Stage; label: string; badge: string }[] = [
+	{ key: 'wip_offer', label: 'Work in progress offer', badge: 'border-amber-300/25 bg-amber-300/8 text-amber-300/80' },
+	{ key: 'offer',     label: 'Offer',                  badge: 'border-blue-400/25 bg-blue-400/8 text-blue-300/80'    },
+	{ key: 'active',    label: 'Active',                 badge: 'border-amber-300/25 bg-amber-300/8 text-amber-300/80' },
+	{ key: 'done',      label: 'Done',                   badge: 'border-emerald-400/25 bg-emerald-400/8 text-emerald-400/80' },
 ];
 
-const deliverableLines = Array.isArray(project.deliverables)
-	? (project.deliverables as string[]).join('\n') : '';
+function deriveStage(p: any): Stage {
+	const s = p.status ?? 'offer';
+	if (s === 'completed') return 'done';
+	if (s === 'active')    return 'active';
+	return (p.offer_is_wip ?? true) ? 'wip_offer' : 'offer';
+}
 
-function nextStatus(s: Task['status']): Task['status'] | null {
-	return s === 'todo' ? 'doing' : s === 'doing' ? 'done' : null;
-}
-function prevStatus(s: Task['status']): Task['status'] | null {
-	return s === 'done' ? 'doing' : s === 'doing' ? 'todo' : null;
-}
+const currentStage: Stage = deriveStage(project);
+const currentStageMeta = STAGES.find((s) => s.key === currentStage)!;
+
 ---
 
-<Base title={`${project.display_title || project.name} — Admin`} description="Admin board">
+<Base title={`${project.display_title || project.name} · Admin`} description="Admin board">
 <div class="mx-auto max-w-5xl px-4 py-10">
 
 	<!-- ── Top nav ─────────────────────────────────────────────────────────── -->
 	<div class="mb-8 flex flex-wrap items-center justify-between gap-3">
 		<a href="/freelance/admin" class="text-xs text-white/30 hover:text-white/60 transition">← All projects</a>
 		<div class="flex items-center gap-2 flex-wrap">
-			<span class={`rounded-full border px-3 py-1 text-xs font-medium ${statusMeta[project.status ?? 'offer'].badge}`}>
-				{statusMeta[project.status ?? 'offer'].label}
-			</span>
-			{(['offer', 'active', 'completed'] as const).filter((s) => s !== (project.status ?? 'offer')).map((s) => (
-				<form method="POST" class="inline">
-					<input type="hidden" name="_action" value="set-status" />
-					<input type="hidden" name="status" value={s} />
-					<button class="rounded-full border border-white/12 bg-white/5 px-2.5 py-1 text-[11px] text-white/40 transition hover:text-white/70">
-						→ {statusMeta[s].label}
-					</button>
-				</form>
-			))}
+			<details class="stage-dropdown" data-stage-dropdown>
+				<summary class={`stage-pill ${currentStageMeta.badge}`}>
+					<span>{currentStageMeta.label}</span>
+					<span class="chevron">▾</span>
+				</summary>
+				<div class="stage-menu">
+					{STAGES.map((s) => (
+						<form method="POST">
+							<input type="hidden" name="_action" value="set-stage" />
+							<input type="hidden" name="stage" value={s.key} />
+							<button type="submit" class={`stage-option ${s.key === currentStage ? 'is-active' : ''}`}>
+								<span>{s.label}</span>
+								{s.key === currentStage && <span class="stage-check">✓</span>}
+							</button>
+						</form>
+					))}
+				</div>
+			</details>
 			<a
 				href={`/freelance/view/${project.share_key}`}
 				target="_blank"
@@ -194,437 +359,585 @@ function prevStatus(s: Task['status']): Task['status'] | null {
 	</div>
 
 	<!-- ── Project heading ─────────────────────────────────────────────────── -->
-	<div class="mb-8">
-		<h1 class="text-2xl font-semibold tracking-tight text-white">{project.display_title || project.name}</h1>
-		{project.client_name && <p class="mt-0.5 text-sm text-white/40">Client: {project.client_name}</p>}
+	<div class="mb-8" data-title-block>
+		<div class="title-view flex items-center gap-3">
+			<h1 class="text-2xl font-semibold tracking-tight text-white">{project.display_title || project.name}</h1>
+			{currentStage === 'wip_offer' && (
+				<button
+					type="button"
+					data-title-edit-toggle
+					aria-label="Edit title"
+					class="rounded-md border border-white/14 bg-white/5 px-2 py-1 text-[11px] text-white/55 hover:text-white/85 hover:bg-white/10 transition"
+				>
+					Edit
+				</button>
+			)}
+		</div>
+		{currentStage === 'wip_offer' && (
+			<form method="POST" class="title-editor mt-1 flex items-center gap-2">
+				<input type="hidden" name="_action" value="set-title" />
+				<input
+					type="text"
+					name="title"
+					value={project.display_title || project.name}
+					required
+					class="field text-2xl font-semibold tracking-tight text-white"
+					style="padding:6px 12px;"
+				/>
+				<button type="submit" class="rounded-[10px] bg-white px-3 py-2 text-xs font-semibold text-black hover:opacity-90 transition">
+					Save
+				</button>
+				<button type="button" data-title-edit-toggle class="text-xs text-white/45 hover:text-white/80 transition">
+					Cancel
+				</button>
+			</form>
+		)}
+		{project.client_name && <p class="mt-1 text-sm text-white/40">Client: {project.client_name}</p>}
 	</div>
 
-	<!-- ── Offer / project details ─────────────────────────────────────────── -->
-	<details class="card mb-6" {(project.status ?? 'offer') === 'offer' ? 'open' : ''}>
-		<summary class="cursor-pointer select-none list-none px-5 py-4 flex items-center justify-between hover:bg-white/2 transition rounded-2xl">
-			<span class="text-sm font-medium text-white/60">Project &amp; offer details</span>
-			<span class="text-xs text-white/25">▾</span>
-		</summary>
-		<form method="POST" class="border-t border-white/[0.04] px-5 py-5 flex flex-col gap-4">
-			<input type="hidden" name="_action" value="update-project" />
-			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-				<label class="flex flex-col gap-1.5">
-					<span class="text-xs text-white/40">Client-facing title</span>
-					<input name="display_title" value={project.display_title ?? ''} placeholder="e.g. AI-powered CRM for Acme"
-						class="field" />
-				</label>
-				<label class="flex flex-col gap-1.5">
-					<span class="text-xs text-white/40">Client name</span>
-					<input name="client_name" value={project.client_name ?? ''} placeholder="Acme Corp"
-						class="field" />
-				</label>
-			</div>
-			<label class="flex flex-col gap-1.5">
-				<span class="text-xs text-white/40">Short description</span>
-				<input name="description" value={project.description ?? ''} placeholder="One-liner shown on board header"
-					class="field" />
-			</label>
-			<label class="flex flex-col gap-1.5">
-				<span class="text-xs text-white/40">Offer summary</span>
-				<textarea name="offer_summary" rows={4} placeholder="Describe scope and approach…"
-					class="field resize-none leading-relaxed"
-				>{project.offer_summary ?? ''}</textarea>
-			</label>
-			<div class="flex flex-col gap-1.5">
-				<span class="text-xs text-white/40">Deliverables</span>
-				<!-- Hidden textarea that gets submitted — kept in sync by JS -->
-				<textarea id="deliverables-hidden" name="deliverables" class="hidden">{deliverableLines}</textarea>
-				<!-- Tag pill UI -->
-				<div
-					id="deliverables-tags"
-					class="field min-h-[52px] flex flex-wrap gap-2 cursor-text"
-					style="padding:10px 12px;"
-					onclick="document.getElementById('deliverables-input').focus()"
-				>
-					{(project.deliverables as string[] ?? []).filter(Boolean).map((item: string) => (
-						<span class="deliverable-tag inline-flex items-center gap-1.5 rounded-full border border-white/14 bg-white/8 pl-3 pr-2 py-1 text-xs text-white/80">
-							{item}
-							<button type="button" class="remove-tag flex h-4 w-4 items-center justify-center rounded-full bg-white/10 text-white/50 hover:bg-white/20 hover:text-white/90 transition text-[10px] leading-none">×</button>
-						</span>
-					))}
-					<input
-						id="deliverables-input"
-						type="text"
-						placeholder={((project.deliverables as string[] ?? []).length === 0) ? "Add deliverable, press Enter…" : ""}
-						class="min-w-[180px] flex-1 bg-transparent text-xs text-white/80 outline-none placeholder:text-white/25"
-					/>
-				</div>
-			</div>
-			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-				<label class="flex flex-col gap-1.5">
-					<span class="text-xs text-white/40">Timeline</span>
-					<input name="timeline" value={project.timeline ?? ''} placeholder='e.g. "4–6 weeks"'
-						class="field" />
-				</label>
-				<label class="flex flex-col gap-1.5">
-					<span class="text-xs text-white/40">Price</span>
-					<input name="price" value={project.price ?? ''} placeholder='e.g. "€4,500"'
-						class="field" />
-				</label>
-			</div>
-			<button type="submit" class="self-start rounded-[10px] bg-white px-4 py-2 text-sm font-semibold text-black hover:opacity-90 transition">
-				Save details
-			</button>
-		</form>
-	</details>
-
-	<!-- ── Labels ──────────────────────────────────────────────────────────── -->
-	<details class="card mb-8">
+	<!-- ── Offer document (WIP / structured) ───────────────────────────────── -->
+	<details class="card mb-6" open={!!offerDoc}>
 		<summary class="cursor-pointer select-none list-none px-5 py-4 flex items-center justify-between hover:bg-white/2 transition rounded-2xl">
 			<div class="flex items-center gap-3">
-				<span class="text-sm font-medium text-white/60">Labels</span>
-				{labels.length > 0 && (
-					<div class="flex items-center gap-1.5">
-						{labels.map((l) => (
-							<span class="h-2.5 w-2.5 rounded-full" style={`background:${l.color}`} title={l.name} />
-						))}
-					</div>
+				<span class="text-sm font-medium text-white/70">Offer document</span>
+				<span class={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wider ${
+					offerIsWip
+						? 'border-amber-300/25 bg-amber-300/8 text-amber-300/80'
+						: 'border-emerald-400/25 bg-emerald-400/8 text-emerald-400/80'
+				}`}>
+					{offerIsWip ? 'WIP' : 'Finalized'}
+				</span>
+				{offerDoc && (
+					<span class="text-xs text-white/35">
+						{offerDoc.sections.length} section{offerDoc.sections.length !== 1 ? 's' : ''} · {offerDoc.sections.reduce((n, s) => n + (s.items?.length ?? 0), 0)} items
+					</span>
 				)}
 			</div>
 			<span class="text-xs text-white/25">▾</span>
 		</summary>
-		<div class="border-t border-white/[0.04] px-5 py-4">
 
-			<!-- Existing labels -->
-			{labels.length > 0 && (
-				<div class="mb-4 flex flex-wrap gap-2">
-					{labels.map((l) => (
-						<div class="flex items-center gap-1.5 rounded-full border px-2.5 py-1" style={`border-color:${l.color}40;background:${l.color}12`}>
-							<span class="h-2 w-2 rounded-full shrink-0" style={`background:${l.color}`} />
-							<span class="text-xs" style={`color:${l.color}`}>{l.name}</span>
-							<form method="POST" class="inline" onsubmit="return confirm('Delete label?')">
-								<input type="hidden" name="_action" value="delete-label" />
-								<input type="hidden" name="label_id" value={l.id} />
-								<button class="ml-0.5 text-[10px] leading-none opacity-40 hover:opacity-80 transition" style={`color:${l.color}`}>×</button>
-							</form>
-						</div>
-					))}
-				</div>
-			)}
+		<div class="border-t border-white/[0.04] px-5 py-5 flex flex-col gap-5">
 
-			<!-- Create label -->
-			<form method="POST" class="flex items-center gap-2 flex-wrap">
-				<input type="hidden" name="_action" value="create-label" />
-				<input
-					name="name"
-					placeholder="Label name"
-					required
-					class="field w-40"
-				/>
-				<!-- Color swatches -->
-				<div class="flex items-center gap-1.5 flex-wrap">
-					{PRESET_COLORS.map((c) => (
-						<label class="relative cursor-pointer">
-							<input type="radio" name="color" value={c} class="peer sr-only" />
-							<span
-								class="block h-5 w-5 rounded-full ring-offset-1 ring-offset-black/50 peer-checked:ring-2 transition"
-								style={`background:${c};--tw-ring-color:${c}`}
-							/>
-						</label>
-					))}
-					<!-- Custom color -->
-					<label class="relative cursor-pointer" title="Custom color">
-						<input type="radio" name="color" value="custom" class="peer sr-only" id="custom-radio" />
-						<input type="color" id="custom-color-input" value="#6b7280"
-							class="h-5 w-5 rounded-full cursor-pointer border-0 bg-transparent p-0 opacity-60 hover:opacity-100 transition"
-							oninput="document.getElementById('custom-radio').value = this.value; document.getElementById('custom-radio').checked = true;"
-						/>
-					</label>
+			<!-- Inline JSON editor: pre-filled with the current doc, edit in place -->
+			<form method="POST" class="flex flex-col gap-3">
+				<input type="hidden" name="_action" value="import-offer-doc" />
+				<p class="text-[11px] text-white/40">Edit the JSON below directly. Save changes to push them live.</p>
+				<textarea
+					name="json"
+					rows={offerDoc ? 18 : 10}
+					placeholder='{"lang":"da","title":"…","scope":{...},"sections":[...]}'
+					class="field font-mono text-[11px] leading-relaxed resize-y"
+				>{offerJson}</textarea>
+				{importError && (
+					<p class="text-xs text-red-400/80">Import failed: {importError}</p>
+				)}
+				<div class="flex items-center gap-2 flex-wrap">
+					<button type="submit" class="rounded-[10px] bg-white px-3.5 py-1.5 text-xs font-semibold text-black hover:opacity-90 transition">
+						{offerDoc ? 'Save changes' : 'Import doc'}
+					</button>
+
+					{offerDoc && (
+						<>
+							<button
+								id="offer-export-copy"
+								type="button"
+								data-offer-json={offerJson}
+								class="rounded-[10px] border border-white/14 bg-white/8 px-3.5 py-1.5 text-xs font-medium text-white/85 transition hover:bg-white/14"
+							>
+								Copy JSON
+							</button>
+							<button
+								type="submit"
+								formaction={`/freelance/admin/${project.id}`}
+								name="_action"
+								value="clear-offer-doc"
+								onclick="return confirm('Clear the entire offer document? Client responses will be kept in the activity log but items will disappear.')"
+								class="ml-auto text-xs text-white/30 hover:text-red-400/70 transition"
+							>
+								Clear doc
+							</button>
+						</>
+					)}
 				</div>
-				<button type="submit" class="rounded-[10px] bg-white px-3 py-2 text-xs font-semibold text-black hover:opacity-90 transition">
-					Add label
-				</button>
 			</form>
-			{labels.length === 0 && (
-				<p class="mt-3 text-xs text-white/25">Create labels to categorize tasks — like Bug, Feature, Frontend, Blocked.</p>
+
+			<!-- Live doc preview (compact) -->
+			{offerDoc && (offerDoc.sections.length > 0 || (offerDoc.scope?.items?.length ?? 0) > 0) && (
+				<div class="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
+					<p class="text-[11px] font-semibold uppercase tracking-widest text-white/35 mb-3">Current doc · client responses</p>
+					{scopeTotals && (offerDoc.scope?.items?.length ?? 0) > 0 && (
+						<div class="mb-4 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5 flex flex-col gap-1 text-xs">
+							<div class="flex items-baseline justify-between text-white/60">
+								<span>{offerDoc.scope?.label || 'Scope'}</span>
+								<span class="tabular-nums">
+									{scopeTotals.includedHours}h
+									{scopeTotals.rate > 0 && <span class="text-white/30"> × {formatMoney(scopeTotals.rate, scopeTotals.currency)} = {formatMoney(scopeTotals.wouldBe, scopeTotals.currency)}</span>}
+								</span>
+							</div>
+							{scopeTotals.fixedPrice > 0 && (
+								<div class="flex items-baseline justify-between text-white/60">
+									<span>Fixed price</span>
+									<span class="tabular-nums text-white/85 font-medium">{formatMoney(scopeTotals.fixedPrice, scopeTotals.currency)}</span>
+								</div>
+							)}
+							{scopeTotals.fixedPrice > 0 && scopeTotals.savings !== 0 && (
+								<div class={`flex items-baseline justify-between ${scopeTotals.savings > 0 ? 'text-emerald-400/80' : 'text-amber-300/80'}`}>
+									<span>{scopeTotals.savings > 0 ? 'Client saves' : 'Over budget'}</span>
+									<span class="tabular-nums">{formatMoney(Math.abs(scopeTotals.savings), scopeTotals.currency)} · {Math.abs(scopeTotals.savingsPct)}%</span>
+								</div>
+							)}
+							{scopeTotals.excludedHours > 0 && (
+								<div class="text-white/30 text-[11px]">Client excluded: {scopeTotals.excludedHours}h</div>
+							)}
+						</div>
+					)}
+					{offerDoc.intro && <p class="mb-3 text-xs text-white/45 whitespace-pre-line leading-relaxed">{offerDoc.intro}</p>}
+					<div class="flex flex-col gap-4">
+						{offerDoc.sections.map((sec) => (
+							<div>
+								<p class="text-xs font-semibold text-white/65">{sec.title || 'Untitled section'}</p>
+								{sec.body && <p class="mt-1 text-[11px] text-white/35 whitespace-pre-line leading-relaxed">{sec.body}</p>}
+								<ul class="mt-2 flex flex-col gap-1.5">
+									{(sec.items ?? []).map((it) => {
+										const st = itemStates.get(it.id);
+										const status = st?.status ?? null;
+										const note = st?.note ?? '';
+										return (
+											<li class="text-[12px] text-white/55 leading-snug">
+												<div class="flex items-start gap-2">
+													<span class={`mt-0.5 rounded-full border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider shrink-0 ${
+														status === 'do_now' ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-400/80'
+														: status === 'later' ? 'border-amber-300/30 bg-amber-300/10 text-amber-300/80'
+														: status === 'skip'  ? 'border-white/15 bg-white/5 text-white/40 line-through'
+														: 'border-white/10 bg-white/3 text-white/25'
+													}`}>
+														{status ? STATUS_LABEL[status] : '·'}
+													</span>
+													<span class={status === 'skip' ? 'line-through text-white/30' : ''}>{it.text}</span>
+												</div>
+												{note && (
+													<p class="mt-1 ml-[68px] text-[11px] text-white/55 italic">↳ {note}</p>
+												)}
+											</li>
+										);
+									})}
+								</ul>
+							</div>
+						))}
+					</div>
+					{offerDoc.outro && <p class="mt-4 text-xs text-white/45 whitespace-pre-line leading-relaxed">{offerDoc.outro}</p>}
+				</div>
 			)}
+
+			<!-- Activity feed (collapsed by default) -->
+			<details>
+				<summary class="cursor-pointer select-none list-none text-[11px] font-semibold uppercase tracking-widest text-white/35 hover:text-white/60 transition flex items-center gap-2">
+					<span>Client activity</span>
+					{(() => {
+						const n = offerEvents.filter((e) => e.kind !== 'doc_replaced').length;
+						return n > 0 ? <span class="rounded-full bg-blue-400/15 text-blue-300/80 px-1.5 py-0.5 text-[9px]">{n}</span> : null;
+					})()}
+					<span class="text-white/25 text-[10px]">▾</span>
+					{offerEvents.some((e) => e.kind !== 'doc_replaced') && (
+						<form method="POST" class="ml-auto" onsubmit="return confirm('Clear all activity? Doc imports stay in the log.')">
+							<input type="hidden" name="_action" value="clear-activity" />
+							<button type="submit" class="text-[10px] font-medium uppercase tracking-wider text-white/30 hover:text-red-400/70 transition">Clear</button>
+						</form>
+					)}
+				</summary>
+				<div class="mt-3">
+					{offerEvents.filter((e) => e.actor === 'client' || e.kind === 'doc_replaced').length === 0 ? (
+						<p class="text-xs text-white/25 italic py-2">No activity yet.</p>
+					) : (
+						<ul class="flex flex-col gap-1.5 max-h-64 overflow-y-auto">
+							{offerEvents.map((ev) => (
+								<li class="text-xs text-white/55 leading-relaxed flex items-baseline gap-2">
+									<span class={`shrink-0 text-[10px] uppercase tracking-wider ${ev.actor === 'client' ? 'text-blue-300/70' : 'text-white/30'}`}>
+										{ev.actor}
+									</span>
+									<span class="flex-1">{eventSummary(ev)}</span>
+									<span class="shrink-0 text-white/25">{evTimeAgo(ev.created_at)}</span>
+								</li>
+							))}
+						</ul>
+					)}
+				</div>
+			</details>
 		</div>
 	</details>
 
-	<!-- ── Board ───────────────────────────────────────────────────────────── -->
+	<!-- ── Work board (derived from offer doc scope items) ───────────────── -->
 	<div class="mb-4 flex items-center justify-between">
-		<p class="text-xs font-semibold uppercase tracking-widest text-white/30">Task Board</p>
-		<span class="text-xs text-white/25">{groups.length} group{groups.length !== 1 ? 's' : ''}</span>
+		<p class="text-xs font-semibold uppercase tracking-widest text-white/30">Work board</p>
+		<span class="text-xs text-white/25">{workItems.length} item{workItems.length !== 1 ? "s" : ""} from offer</span>
 	</div>
 
-	{groups.length === 0 && (
-		<p class="text-center text-sm text-white/25 py-10">No task groups yet — add one below.</p>
+	{workItems.length === 0 && (
+		<p class="text-center text-sm text-white/25 py-10">
+			No work yet. Add scope items to the offer document above. Anything the client doesn't <span class="text-white/40">Skip</span> shows up here.
+		</p>
 	)}
 
-	<div class="flex flex-col gap-8">
-		{groups.map((group) => (
-			<div class="card p-5">
+	{workItems.length > 0 && (
+		<div class="card p-5">
 
-				<div class="mb-4 flex items-center justify-between gap-3">
-					<h2 class="text-sm font-semibold uppercase tracking-widest text-white/55">{group.name}</h2>
-					<div class="flex items-center gap-3">
-						<span class="text-xs text-white/25">{group.tasks.length} task{group.tasks.length !== 1 ? 's' : ''}</span>
-						<form method="POST" onsubmit="return confirm('Delete this group and all its tasks?')">
-							<input type="hidden" name="_action" value="delete-group" />
-							<input type="hidden" name="group_id" value={group.id} />
-							<button class="text-xs text-white/20 hover:text-red-400/60 transition">Delete</button>
-						</form>
-					</div>
+			<!-- Header: total hours + deadline -->
+			<div class="mb-5 flex items-center justify-between gap-4 flex-wrap">
+				<div class="flex items-baseline gap-3">
+					<span class="text-xs uppercase tracking-widest text-white/35">Total</span>
+					<span class="text-base font-semibold text-white/85 tabular-nums">{workItems.reduce((n, w) => n + w.hours, 0)}h</span>
 				</div>
-
-				<div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-					{statusCols.map((col) => {
-						const colTasks = group.tasks.filter((t) => t.status === col.key);
-						return (
-							<div>
-								<div class={`mb-2.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest ${col.headerColor}`}>
-									{col.label}
-									<span class="rounded-full bg-white/8 px-1.5 py-0.5 text-[10px] font-normal text-white/30">{colTasks.length}</span>
-								</div>
-
-								<div class="flex flex-col gap-2 min-h-[52px] kanban-col rounded-xl transition-colors" data-drop-col={col.key} data-group-id={group.id}>
-									{colTasks.map((task) => {
-										const taskLabelIds = new Set(task.task_labels?.map((tl) => tl.label_id) ?? []);
-										const taskLabels   = labels.filter((l) => taskLabelIds.has(l.id));
-										const unusedLabels = labels.filter((l) => !taskLabelIds.has(l.id));
-										const prev = prevStatus(col.key);
-										const next = nextStatus(col.key);
-										return (
-											<div class={`rounded-xl border p-3 ${col.color} cursor-grab active:cursor-grabbing`} draggable="true" data-task-card data-task-id={task.id}>
-
-												<p class="text-sm text-white/85 leading-snug">{task.title}</p>
-												{task.description && (
-													<p class="mt-1 text-xs text-white/40 leading-snug">{task.description}</p>
-												)}
-
-												<!-- Label pills -->
-												{taskLabels.length > 0 && (
-													<div class="mt-2 flex flex-wrap gap-1.5">
-														{taskLabels.map((l) => (
-															<span
-																class="inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[11px] leading-none"
-																style={`border-color:${l.color}40;background:${l.color}15;color:${l.color}`}
-															>
-																<span class="h-1.5 w-1.5 rounded-full" style={`background:${l.color}`} />
-																{l.name}
-															</span>
-														))}
-													</div>
-												)}
-
-												<!-- Actions row -->
-												<div class="mt-2.5 flex items-center gap-1.5 flex-wrap">
-													{prev && (
-														<form method="POST" class="inline">
-															<input type="hidden" name="_action" value="move-task" />
-															<input type="hidden" name="task_id" value={task.id} />
-															<input type="hidden" name="status" value={prev} />
-															<button class="text-[11px] text-white/30 hover:text-white/70 transition">
-																← {prev.charAt(0).toUpperCase() + prev.slice(1)}
-															</button>
-														</form>
-													)}
-													{prev && next && <span class="text-white/15 text-[10px]">·</span>}
-													{next && (
-														<form method="POST" class="inline">
-															<input type="hidden" name="_action" value="move-task" />
-															<input type="hidden" name="task_id" value={task.id} />
-															<input type="hidden" name="status" value={next} />
-															<button class="text-[11px] text-white/30 hover:text-white/70 transition">
-																{next.charAt(0).toUpperCase() + next.slice(1)} →
-															</button>
-														</form>
-													)}
-
-													<!-- Label toggle dropdown -->
-													{labels.length > 0 && (
-														<details class="relative ml-auto">
-															<summary class="cursor-pointer select-none list-none text-[11px] text-white/25 hover:text-white/60 transition">
-																label
-															</summary>
-															<div class="absolute right-0 top-5 z-20 min-w-[140px] rounded-xl border border-white/12 bg-[#0d1117] p-2 shadow-xl flex flex-col gap-0.5">
-																{taskLabels.map((l) => (
-																	<form method="POST">
-																		<input type="hidden" name="_action" value="toggle-label" />
-																		<input type="hidden" name="task_id" value={task.id} />
-																		<input type="hidden" name="label_id" value={l.id} />
-																		<input type="hidden" name="assigned" value="1" />
-																		<button class="w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-left hover:bg-white/6 transition">
-																			<span class="h-2 w-2 rounded-full shrink-0" style={`background:${l.color}`} />
-																			<span style={`color:${l.color}`}>{l.name}</span>
-																			<span class="ml-auto text-white/30">✓</span>
-																		</button>
-																	</form>
-																))}
-																{unusedLabels.map((l) => (
-																	<form method="POST">
-																		<input type="hidden" name="_action" value="toggle-label" />
-																		<input type="hidden" name="task_id" value={task.id} />
-																		<input type="hidden" name="label_id" value={l.id} />
-																		<input type="hidden" name="assigned" value="0" />
-																		<button class="w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-left hover:bg-white/6 transition">
-																			<span class="h-2 w-2 rounded-full shrink-0 opacity-40" style={`background:${l.color}`} />
-																			<span class="text-white/50">{l.name}</span>
-																		</button>
-																	</form>
-																))}
-															</div>
-														</details>
-													)}
-
-													<form method="POST" class="inline" onsubmit="return confirm('Delete task?')">
-														<input type="hidden" name="_action" value="delete-task" />
-														<input type="hidden" name="task_id" value={task.id} />
-														<button class="text-[11px] text-white/20 hover:text-red-400/60 transition">×</button>
-													</form>
-												</div>
-
-											</div>
-										);
-									})}
-								</div>
-							</div>
-						);
-					})}
-				</div>
-
-				<!-- Add task -->
-				<details class="mt-4 border-t border-white/[0.04] pt-4">
-					<summary class="cursor-pointer select-none list-none text-xs text-white/30 hover:text-white/60 transition">
-						+ Add task
-					</summary>
-					<form method="POST" class="mt-3 flex flex-col gap-2">
-						<input type="hidden" name="_action" value="add-task" />
-						<input type="hidden" name="group_id" value={group.id} />
-						<input name="title" placeholder="Task title" required
-							class="field" />
-						<input name="description" placeholder="Short note (optional)"
-							class="field" />
-						<button type="submit" class="self-start rounded-[8px] bg-white px-3 py-1.5 text-xs font-semibold text-black hover:opacity-90 transition">
-							Add task
+				<div class="deadline-block flex items-center gap-2" data-deadline-block>
+					<div class="deadline-view flex items-center gap-2">
+						<span class="text-xs uppercase tracking-widest text-white/35">Deadline</span>
+						<span class="text-sm font-medium text-white/80">{project.deadline || '—'}</span>
+						<button type="button" data-deadline-edit-toggle class="rounded-md border border-white/14 bg-white/5 px-2 py-0.5 text-[10px] text-white/55 hover:text-white/85 hover:bg-white/10 transition">
+							{project.deadline ? 'Edit' : '+ Set'}
 						</button>
+					</div>
+					<form method="POST" class="deadline-editor flex items-center gap-2">
+						<input type="hidden" name="_action" value="set-deadline" />
+						<input
+							type="text"
+							name="deadline"
+							value={project.deadline ?? ''}
+							placeholder='e.g. "30 April" or "Q2"'
+							class="field text-xs"
+							style="padding:5px 10px;width:160px;"
+						/>
+						<button type="submit" class="rounded-[8px] bg-white px-2.5 py-1 text-[11px] font-semibold text-black hover:opacity-90 transition">Save</button>
+						<button type="button" data-deadline-edit-toggle class="text-[11px] text-white/45 hover:text-white/80 transition">Cancel</button>
 					</form>
-				</details>
-
+				</div>
 			</div>
-		))}
-	</div>
 
-	<!-- Add group -->
-	<div class="mt-8 card p-5">
-		<p class="mb-3 text-xs font-semibold uppercase tracking-widest text-white/30">Add task group</p>
-		<form method="POST" class="flex gap-3">
-			<input type="hidden" name="_action" value="add-group" />
-			<input name="name" placeholder='e.g. "Daily Tasks" · "AI Integration" · "Azure" · "Frontend"' required
-				class="field flex-1" />
-			<button type="submit" class="rounded-[10px] bg-white px-4 py-2.5 text-sm font-semibold text-black hover:opacity-90 transition whitespace-nowrap">
-				Add group
-			</button>
-		</form>
-	</div>
+			<!-- Kanban -->
+			<div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+				{progressCols.map((col) => {
+					const colItems = workItems.filter((w) => w.progress === col.key);
+					const colHours = colItems.reduce((n, w) => n + w.hours, 0);
+					return (
+						<div class="kanban-col" data-drop-col={col.key}>
+							<div class={`mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-widest ${col.headerColor}`}>
+								<span>{col.label}</span>
+								<span class="rounded-full bg-white/8 px-1.5 py-0.5 text-[9px] font-normal text-white/40">{colItems.length}</span>
+								{colHours > 0 && <span class="ml-auto text-[9px] font-normal tabular-nums text-white/30">{colHours}h</span>}
+							</div>
+
+							<div class="kanban-list flex flex-col gap-2 min-h-[80px] rounded-xl p-1 transition-colors">
+								{colItems.map((w) => (
+									<div
+										class={`kanban-card group relative rounded-xl border p-3 cursor-grab active:cursor-grabbing transition-all hover:border-white/22 hover:shadow-lg ${w.clientStatus === 'later' ? 'opacity-60' : ''}`}
+										draggable="true"
+										data-item-id={w.id}
+									>
+										{w.group && (
+											<p class="mb-1.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-white/35">{w.group}</p>
+										)}
+										<div class="flex items-start gap-2">
+											<p class="flex-1 text-sm text-white/85 leading-snug">{w.text}</p>
+											<span class="shrink-0 rounded-full bg-white/6 px-1.5 py-0.5 text-[10px] tabular-nums text-white/55">{w.hours}h</span>
+										</div>
+										{w.clientStatus === 'later' && (
+											<p class="mt-1.5 inline-block rounded-full bg-amber-300/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-amber-300/75">Later</p>
+										)}
+										{col.key === 'done' && (
+											<div class="mt-2 flex items-center justify-between gap-2 border-t border-white/[0.06] pt-2 text-[10px]">
+												<span class="text-white/40 uppercase tracking-wider">Faktisk</span>
+												<form method="POST" class="flex items-center gap-1.5">
+													<input type="hidden" name="_action" value="set-actual-hours" />
+													<input type="hidden" name="item_id" value={w.id} />
+													<input
+														type="text"
+														inputmode="decimal"
+														name="hours"
+														value={w.actualHours != null ? String(w.actualHours) : ''}
+														placeholder="—"
+														class="field tabular-nums"
+														style="padding:2px 6px;width:52px;text-align:right;font-size:11px;"
+														onclick="event.stopPropagation()"
+													/>
+													<span class="text-white/30">h</span>
+												</form>
+											</div>
+										)}
+									</div>
+								))}
+							</div>
+						</div>
+					);
+				})}
+			</div>
+
+			<p class="mt-5 text-[11px] text-white/30 leading-relaxed">
+				Drag cards between columns. Items come from the offer doc scope; edit the doc to add or remove. <span class="text-amber-300/70">Later</span> items are dimmed; <span class="text-white/55">Skip</span> items are hidden.
+			</p>
+		</div>
+	)}
+
+	<!-- Hidden form used by drag and drop to submit move-item -->
+	<form id="dnd-move-form" method="POST" style="display:none">
+		<input type="hidden" name="_action" value="move-item" />
+		<input id="dnd-move-item" type="hidden" name="item_id" value="" />
+		<input id="dnd-move-progress" type="hidden" name="progress" value="" />
+		<input id="dnd-move-index" type="hidden" name="index" value="" />
+	</form>
+
 
 </div>
 
-<!-- Hidden form used by drag-and-drop -->
-<form id="dnd-form" method="POST" style="display:none">
-	<input type="hidden" name="_action" value="move-task" />
-	<input id="dnd-task-id" type="hidden" name="task_id" value="" />
-	<input id="dnd-status" type="hidden" name="status" value="" />
-</form>
-
-<style>
-	.kanban-col.drag-over {
-		background: rgba(255,255,255,0.04);
-		outline: 1.5px dashed rgba(255,255,255,0.18);
-	}
-</style>
-
 <script>
-	// ── Deliverables tag input ────────────────────────────────────────────────
-	const tagsEl   = document.getElementById('deliverables-tags')!;
-	const inputEl  = document.getElementById('deliverables-input') as HTMLInputElement;
-	const hiddenEl = document.getElementById('deliverables-hidden') as HTMLTextAreaElement;
-
-	function syncHidden() {
-		const tags = Array.from(tagsEl.querySelectorAll<HTMLElement>('.deliverable-tag'))
-			.map((t) => t.childNodes[0].textContent?.trim() ?? '').filter(Boolean);
-		hiddenEl.value = tags.join('\n');
-		inputEl.placeholder = tags.length === 0 ? 'Add deliverable, press Enter…' : '';
-	}
-
-	function addTag(value: string) {
-		const text = value.trim();
-		if (!text) return;
-		const span = document.createElement('span');
-		span.className = 'deliverable-tag inline-flex items-center gap-1.5 rounded-full border border-white/14 bg-white/8 pl-3 pr-2 py-1 text-xs text-white/80';
-		span.innerHTML = `${text}<button type="button" class="remove-tag flex h-4 w-4 items-center justify-center rounded-full bg-white/10 text-white/50 hover:bg-white/20 hover:text-white/90 transition text-[10px] leading-none">×</button>`;
-		tagsEl.insertBefore(span, inputEl);
-		inputEl.value = '';
-		syncHidden();
-	}
-
-	inputEl.addEventListener('keydown', (e) => {
-		if (e.key === 'Enter') {
-			e.preventDefault();
-			addTag(inputEl.value);
-		} else if (e.key === 'Backspace' && inputEl.value === '') {
-			const last = tagsEl.querySelector<HTMLElement>('.deliverable-tag:last-of-type');
-			last?.remove();
-			syncHidden();
-		}
-	});
-
-	tagsEl.addEventListener('click', (e) => {
-		const btn = (e.target as HTMLElement).closest('.remove-tag');
-		if (btn) { btn.closest('.deliverable-tag')?.remove(); syncHidden(); }
-	});
-
-	// ── Copy share link ───────────────────────────────────────────────────────
-	const btn = document.getElementById('copy-share');
-	btn?.addEventListener('click', () => {
-		const url = (btn as HTMLElement).dataset.url ?? '';
-		navigator.clipboard.writeText(url).then(() => {
-			btn.textContent = 'Copied!';
-			setTimeout(() => { btn.textContent = 'Copy client link'; }, 1800);
-		});
-	});
-
-	// ── Kanban drag-and-drop ──────────────────────────────────────────────────
 	let draggingId: string | null = null;
 
-	document.querySelectorAll<HTMLElement>('[data-task-card]').forEach((card) => {
-		card.addEventListener('dragstart', (e) => {
-			draggingId = card.dataset.taskId ?? null;
-			setTimeout(() => { card.style.opacity = '0.35'; }, 0);
-			(e as DragEvent).dataTransfer!.effectAllowed = 'move';
+	function bindAdminInteractive() {
+		const titleBlock = document.querySelector<HTMLElement>('[data-title-block]');
+		titleBlock?.querySelectorAll<HTMLButtonElement>('[data-title-edit-toggle]').forEach((btn) => {
+			if ((btn as any).__bound) return;
+			(btn as any).__bound = true;
+			btn.addEventListener('click', () => {
+				titleBlock.classList.toggle('editing');
+				if (titleBlock.classList.contains('editing')) {
+					titleBlock.querySelector<HTMLInputElement>('input[name="title"]')?.focus();
+				}
+			});
 		});
-		card.addEventListener('dragend', () => {
-			card.style.opacity = '';
-			document.querySelectorAll<HTMLElement>('.kanban-col').forEach((col) => col.classList.remove('drag-over'));
+
+		const deadlineBlock = document.querySelector<HTMLElement>('[data-deadline-block]');
+		deadlineBlock?.querySelectorAll<HTMLButtonElement>('[data-deadline-edit-toggle]').forEach((btn) => {
+			if ((btn as any).__bound) return;
+			(btn as any).__bound = true;
+			btn.addEventListener('click', () => {
+				deadlineBlock.classList.toggle('editing');
+				if (deadlineBlock.classList.contains('editing')) {
+					deadlineBlock.querySelector<HTMLInputElement>('input[name="deadline"]')?.focus();
+				}
+			});
+		});
+
+		document.querySelectorAll<HTMLElement>('.kanban-card').forEach((card) => {
+			if ((card as any).__bound) return;
+			(card as any).__bound = true;
+			card.addEventListener('dragstart', (e) => {
+				const target = e.target as HTMLElement;
+				// Don't start drag when interacting with form fields inside the card.
+				if (target.closest('input, textarea, button, form')) {
+					e.preventDefault();
+					return;
+				}
+				draggingId = card.dataset.itemId ?? null;
+				card.classList.add('dragging');
+				(e as DragEvent).dataTransfer!.effectAllowed = 'move';
+			});
+			card.addEventListener('dragend', () => {
+				card.classList.remove('dragging');
+				document.querySelectorAll<HTMLElement>('.kanban-list').forEach((l) => l.classList.remove('drop-target'));
+				draggingId = null;
+			});
+		});
+
+		document.querySelectorAll<HTMLElement>('.kanban-col').forEach((col) => {
+			if ((col as any).__bound) return;
+			(col as any).__bound = true;
+			const list = col.querySelector<HTMLElement>('.kanban-list');
+			if (!list) return;
+
+			col.addEventListener('dragover', (e) => {
+				e.preventDefault();
+				(e as DragEvent).dataTransfer!.dropEffect = 'move';
+				list.classList.add('drop-target');
+			});
+			col.addEventListener('dragleave', (e) => {
+				if (!col.contains((e as MouseEvent).relatedTarget as Node)) {
+					list.classList.remove('drop-target');
+				}
+			});
+			col.addEventListener('drop', (e) => {
+				e.preventDefault();
+				list.classList.remove('drop-target');
+				if (!draggingId) return;
+				const newProgress = col.dataset.dropCol ?? '';
+				if (!newProgress) return;
+
+				const dropY = (e as DragEvent).clientY;
+				const draggedId = draggingId;
+				const draggedCard = document.querySelector<HTMLElement>(`.kanban-card[data-item-id="${draggedId}"]`);
+				const cards = Array.from(list.querySelectorAll<HTMLElement>('.kanban-card'))
+					.filter((c) => c.dataset.itemId !== draggedId);
+				let index = cards.length;
+				let beforeNode: HTMLElement | null = null;
+				for (let i = 0; i < cards.length; i++) {
+					const r = cards[i].getBoundingClientRect();
+					if (dropY < r.top + r.height / 2) {
+						index = i;
+						beforeNode = cards[i];
+						break;
+					}
+				}
+
+				// 1. Optimistically move the DOM node into the new position now.
+				if (draggedCard) {
+					if (beforeNode) {
+						list.insertBefore(draggedCard, beforeNode);
+					} else {
+						list.appendChild(draggedCard);
+					}
+					draggedCard.classList.remove('dragging');
+				}
+
+				// 2. Fire the move via fetch in the background (no full reload).
+				const fd = new FormData();
+				fd.append('_action', 'move-item');
+				fd.append('item_id', draggedId);
+				fd.append('progress', newProgress);
+				fd.append('index', String(index));
+				fetch(window.location.pathname, { method: 'POST', body: fd }).catch((err) => {
+					console.error('move-item failed', err);
+				});
+			});
+		});
+
+		// Actual hours input: auto-save after 2s of inactivity, on Enter, or on blur.
+		document.querySelectorAll<HTMLInputElement>('input[name="hours"]').forEach((input) => {
+			if ((input as any).__bound) return;
+			(input as any).__bound = true;
+
+			let debounceTimer: number | null = null;
+			let lastSavedValue = input.value.trim();
+
+			const flashSaved = () => {
+				input.style.borderColor = 'rgba(52, 211, 153, 0.7)';
+				setTimeout(() => { input.style.borderColor = ''; }, 700);
+			};
+
+			const submit = () => {
+				if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
+				const current = input.value.trim();
+				if (current === lastSavedValue) return;
+				const form = input.closest<HTMLFormElement>('form');
+				if (!form) return;
+				const fd = new FormData(form);
+				lastSavedValue = current;
+				fetch(window.location.pathname, { method: 'POST', body: fd })
+					.then(() => flashSaved())
+					.catch((err) => console.error('actual hours save failed', err));
+			};
+
+			input.addEventListener('input', () => {
+				if (debounceTimer) clearTimeout(debounceTimer);
+				debounceTimer = window.setTimeout(submit, 2000);
+			});
+			input.addEventListener('keydown', (e) => {
+				if (e.key === 'Enter') { e.preventDefault(); submit(); }
+			});
+			input.addEventListener('blur', () => submit());
+			input.addEventListener('mousedown', (e) => e.stopPropagation());
+		});
+
+		const exportBtn = document.getElementById('offer-export-copy') as HTMLButtonElement | null;
+		if (exportBtn && !(exportBtn as any).__bound) {
+			(exportBtn as any).__bound = true;
+			exportBtn.addEventListener('click', () => {
+				const json = exportBtn.dataset.offerJson ?? '';
+				if (!json) return;
+				navigator.clipboard.writeText(json).then(() => {
+					const original = exportBtn.textContent;
+					exportBtn.textContent = 'Copied!';
+					setTimeout(() => { exportBtn.textContent = original; }, 1500);
+				});
+			});
+		}
+
+		const btn = document.getElementById('copy-share');
+		if (btn && !(btn as any).__bound) {
+			(btn as any).__bound = true;
+			btn.addEventListener('click', () => {
+				const url = (btn as HTMLElement).dataset.url ?? '';
+				navigator.clipboard.writeText(url).then(() => {
+					btn.textContent = 'Copied!';
+					setTimeout(() => { btn.textContent = 'Copy client link'; }, 1800);
+				});
+			});
+		}
+	}
+
+	// Form enhancement: POST via fetch + swap <main> instead of full reload.
+	let isSubmitting = false;
+	async function enhanceSubmit(form: HTMLFormElement) {
+		if (isSubmitting) return;
+		isSubmitting = true;
+		try {
+			const fd = new FormData(form);
+			const scrollY = window.scrollY;
+			const res = await fetch(window.location.pathname, { method: 'POST', body: fd });
+			const html = await res.text();
+			const parser = new DOMParser();
+			const doc = parser.parseFromString(html, 'text/html');
+			const newMain = doc.querySelector('main');
+			const curMain = document.querySelector('main');
+			if (newMain && curMain) {
+				curMain.replaceWith(newMain);
+				bindAdminInteractive();
+				window.scrollTo({ top: scrollY, behavior: 'instant' as ScrollBehavior });
+			}
+		} catch (err) {
+			console.error('enhanceSubmit failed', err);
+			form.submit();
+		} finally {
+			isSubmitting = false;
+		}
+	}
+
+	function applyOptimisticAdmin(form: HTMLFormElement, action: string, fd: FormData) {
+		if (action === 'set-title') {
+			const newTitle = (fd.get('title') ?? '').toString().trim();
+			if (newTitle) {
+				const heading = document.querySelector<HTMLElement>('[data-title-block] .title-view h1');
+				if (heading) heading.textContent = newTitle;
+				document.querySelector<HTMLElement>('[data-title-block]')?.classList.remove('editing');
+			}
+		} else if (action === 'set-deadline') {
+			const newDeadline = (fd.get('deadline') ?? '').toString().trim();
+			const view = document.querySelector<HTMLElement>('[data-deadline-block] .deadline-view span:nth-of-type(2)');
+			if (view) view.textContent = newDeadline || '—';
+			document.querySelector<HTMLElement>('[data-deadline-block]')?.classList.remove('editing');
+		} else if (action === 'set-stage') {
+			// Visual feedback only; the page will reflect the new stage on next load.
+			// (Stage drives a lot of conditional rendering, so we still do the swap.)
+		} else if (action === 'set-item-progress' || action === 'move-item') {
+			// Already handled by drop handler / DOM swap below.
+		}
+	}
+
+	document.addEventListener('submit', (e) => {
+		const form = e.target as HTMLFormElement;
+		if (!(form instanceof HTMLFormElement)) return;
+		if (form.method.toLowerCase() !== 'post') return;
+		if (!form.closest('main')) return;
+		const fd = new FormData(form);
+		const action = (fd.get('_action') ?? '').toString();
+		if (action === 'import-offer-doc' || action === 'clear-offer-doc') return;
+		// Actual-hours form is handled inline by its own input listeners.
+		if (action === 'set-actual-hours') { e.preventDefault(); return; }
+
+		e.preventDefault();
+		applyOptimisticAdmin(form, action, fd);
+
+		// For purely-local changes (deadline, title), fire and forget — no swap.
+		if (action === 'set-title' || action === 'set-deadline') {
+			fetch(window.location.pathname, { method: 'POST', body: fd }).catch(console.error);
+			return;
+		}
+
+		// For everything else (stage changes, etc.) still swap so cascades render.
+		void enhanceSubmit(form);
+	});
+
+	document.addEventListener('click', (e) => {
+		document.querySelectorAll<HTMLDetailsElement>('details[data-stage-dropdown][open]').forEach((d) => {
+			if (!d.contains(e.target as Node)) d.removeAttribute('open');
 		});
 	});
 
-	document.querySelectorAll<HTMLElement>('.kanban-col').forEach((col) => {
-		col.addEventListener('dragover', (e) => {
-			e.preventDefault();
-			(e as DragEvent).dataTransfer!.dropEffect = 'move';
-			col.classList.add('drag-over');
-		});
-		col.addEventListener('dragleave', (e) => {
-			if (!col.contains((e as MouseEvent).relatedTarget as Node)) {
-				col.classList.remove('drag-over');
-			}
-		});
-		col.addEventListener('drop', (e) => {
-			e.preventDefault();
-			col.classList.remove('drag-over');
-			if (!draggingId) return;
-			const status = col.dataset.dropCol ?? '';
-			if (!status) return;
-			(document.getElementById('dnd-task-id') as HTMLInputElement).value = draggingId;
-			(document.getElementById('dnd-status') as HTMLInputElement).value = status;
-			(document.getElementById('dnd-form') as HTMLFormElement).submit();
-		});
-	});
+	bindAdminInteractive();
 </script>
 </Base>

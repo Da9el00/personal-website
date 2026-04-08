@@ -1,0 +1,199 @@
+{
+  "lang": "da",
+  "client_name": "Marcuz Emil W.",
+  "title": "LektieLet.dk - MVP",
+  "deadline": "TBD",
+  "intro": "Hej Marcuz,\n\nFørste bud på scope til en MVP. Tjek punkter til eller fra, svar på spørgsmålene, og kommenter nederst.\n\nv1 fokuserer på kerne-flowet: foto til AI til hint. Ikke med i v1: avanceret design, GDPR/forældre-flow, og monitorering. Det tager vi efter lancering hvis der er behov.",
+  "scope": {
+    "label": "Scope & pris",
+    "currency": "DKK",
+    "hourly_rate": 800,
+    "fixed_price": null,
+    "items": [
+      {
+        "id": "scope_discovery",
+        "text": "Discovery og arkitektur planning (gennemgang af eksisterende Lovable prototype, alignment på flow + tech)",
+        "hours": 3,
+        "group": "Setup & arkitektur",
+        "required": true
+      },
+      {
+        "id": "scope_skeleton",
+        "text": "Projekt-skelet, Vercel deploy, DNS og domæne-opsætning",
+        "hours": 3,
+        "group": "Setup & arkitektur",
+        "required": true
+      },
+            {
+        "id": "scope_skeleton",
+        "text": "Konto opsætning: Supabase, Azure, Vercel",
+        "hours": 2,
+        "group": "Setup & arkitektur",
+        "required": true
+      },
+      {
+        "id": "scope_db",
+        "text": "Database schema (Supabase tabeller)",
+        "hours": 2,
+        "group": "Setup & arkitektur",
+        "required": true
+      },
+      {
+        "id": "scope_login",
+        "text": "Login flow via Supabase (e-mail)",
+        "hours": 4,
+        "group": "Login & adgang"
+      },
+      {
+        "id": "scope_upload",
+        "text": "Mobilvenlig foto-upload (kamera + galleri)",
+        "hours": 3,
+        "group": "Kerne-flow",
+        "required": true
+      },
+      {
+        "id": "scope_ai",
+        "text": "AI billedanalyse: læs lektien (Azure OpenAI vision)",
+        "hours": 5,
+        "group": "Kerne-flow",
+        "required": true
+      },
+      {
+        "id": "scope_multi",
+        "text": "Flere opgaver pr. billede: liste og valg",
+        "hours": 2,
+        "group": "Kerne-flow"
+      },
+      {
+        "id": "scope_hint",
+        "text": "Hint-flow: AI guider barnet ét skridt ad gangen mod svaret",
+        "hours": 8,
+        "group": "Kerne-flow",
+        "required": true
+      },
+      {
+        "id": "scope_prompts",
+        "text": "Prompt engineering: iteration til pædagogisk korrekt AI",
+        "hours": 4,
+        "group": "Kerne-flow",
+        "required": true
+      },
+      {
+        "id": "scope_tone",
+        "text": "Tilpasning af sprogtone til klassetrin",
+        "hours": 3,
+        "group": "Kerne-flow"
+      },
+      {
+        "id": "scope_test",
+        "text": "Test på rigtige lektier + finpudsning",
+        "hours": 4,
+        "group": "Polish & test",
+        "required": true
+      }
+    ]
+  },
+  "sections": [
+    {
+      "id": "sec_usecase",
+      "title": "Use case: når der tages et billede",
+      "kind": "usecase",
+      "body": "Det konkrete flow:\n\nBarnet åbner appen → tager et billede af lektien → AI læser billedet → vis liste hvis flere opgaver → barnet vælger én → AI stiller åbent spørgsmål eller giver et første hint → AI guider ét skridt ad gangen → barnet finder selv svaret.",
+      "items": [
+        {
+          "id": "q_flow_ok",
+          "text": "Er det nogenlunde det du ser for dig?"
+        }
+      ]
+    },
+    {
+      "id": "sec_questions",
+      "title": "Spørgsmål til scope",
+      "kind": "questions",
+      "items": [
+        {
+          "id": "q_login",
+          "text": "Skal vi have login i v1? Svar Nej hvis e-mail ikke er nødvendigt fra start.",
+          "links": [
+            "scope_login"
+          ]
+        },
+        {
+          "id": "q_google",
+          "text": "Skal Google login med fra start (ekstra arbejde)?"
+        },
+        {
+          "id": "q_domain",
+          "text": "Er domænet købt og klar?"
+        }
+      ]
+    },
+    {
+      "id": "sec_tech",
+      "title": "Teknisk",
+      "kind": "questions",
+      "items": [
+        {
+          "id": "q_lovable_gh",
+          "text": "Er Lovable forbundet til GitHub så jeg kan arbejde direkte i koden?"
+        },
+        {
+          "id": "q_lovable_keep",
+          "text": "Vil du selv kunne lave ændringer i Lovable på sigt?"
+        }
+      ]
+    },
+    {
+      "id": "sec_client_tasks",
+      "title": "Hvad jeg skal bruge fra dig",
+      "kind": "checklist",
+      "body": "For at jeg kan komme i gang har jeg brug for adgang og info. Tjek af når det er sendt.",
+      "items": [
+        {
+          "id": "task_github",
+          "text": "Inviter mig til GitHub repo'et med din Lovable-kode"
+        },
+        {
+          "id": "task_lovable",
+          "text": "Send mig adgang til Lovable projektet (eller en read-only invite)"
+        },
+        {
+          "id": "task_grade",
+          "text": "Bekræft hvilke klassetrin appen primært er til"
+        },
+        {
+          "id": "task_examples",
+          "text": "Send 3 til 5 eksempel-billeder af lektier til test"
+        },
+        {
+          "id": "task_perfect_case",
+          "text": "Beskriv 1 til 2 eksempler på et perfekt forløb: billede + hele den ideelle samtale frem og tilbage mellem AI og barn (det styrer prompt-arbejdet)"
+        },
+        {
+          "id": "task_domain_info",
+          "text": "Send domænenavn og hvor det er købt (hvis købt)"
+        }
+      ]
+    },
+    {
+      "id": "sec_accounts",
+      "title": "Konti der skal oprettes",
+      "kind": "checklist",
+      "body": "Du opretter selv kontiene så du har fuld kontrol. Send mig derefter login eller inviter min email.",
+      "items": [
+        {
+          "id": "task_supabase",
+          "text": "Supabase (database + login)"
+        },
+        {
+          "id": "task_azure",
+          "text": "Azure (AI / LLM)"
+        },
+        {
+          "id": "task_vercel",
+          "text": "Vercel (hosting) (måske)"
+        }
+      ]
+    }
+  ]
+}

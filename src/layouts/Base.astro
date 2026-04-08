@@ -75,15 +75,17 @@ const personSchema = {
 		<!-- Apply saved theme before paint to prevent flash — is:inline ensures this runs synchronously -->
 		<script is:inline>
 			(function(){
+				// Light is the default. Only switch to dark if the user explicitly chose it.
 				try {
 					var t = localStorage.getItem('theme');
-					var prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
-					if (t === 'light' || (!t && prefersLight)) {
+					if (t !== 'dark') {
 						document.documentElement.classList.add('light');
-						// Set background directly so it's applied before CSS parses — eliminates the dark flash
 						document.documentElement.style.background = '#f2f2f7';
 					}
-				} catch(e){}
+				} catch(e){
+					document.documentElement.classList.add('light');
+					document.documentElement.style.background = '#f2f2f7';
+				}
 			})();
 		</script>
 	</head>

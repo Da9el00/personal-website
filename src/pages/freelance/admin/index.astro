@@ -63,7 +63,7 @@ function timeAgo(iso: string): string {
 }
 ---
 
-<Base title="Freelance Admin — Daniel Smidstrup" description="Admin dashboard">
+<Base title="Freelance Admin · Daniel Smidstrup" description="Admin dashboard">
 <div class="mx-auto max-w-3xl px-4 py-12">
 
 	<!-- Header -->
@@ -177,30 +177,39 @@ function timeAgo(iso: string): string {
 
 	<div class="flex flex-col gap-3">
 		{projects?.map((p) => (
-			<div class="card flex items-center gap-4 px-5 py-4">
-				<div class="flex-1 min-w-0">
+			<div class="card relative flex items-center gap-4 px-5 py-4 transition hover:bg-white/[0.03]">
+				<!-- Stretched link: makes the whole card clickable. Sits behind interactive children. -->
+				<a
+					href={`/freelance/admin/${p.id}`}
+					class="absolute inset-0 z-0 rounded-2xl"
+					aria-label={`Open ${p.display_title || p.name}`}
+				></a>
+
+				<div class="flex-1 min-w-0 pointer-events-none">
 					<p class="text-sm font-medium text-white/90 truncate">{p.display_title || p.name}</p>
-					<p class="text-xs text-white/50 mt-0.5">{p.client_name}{p.description ? ` — ${p.description}` : ''}</p>
+					<p class="text-xs text-white/50 mt-0.5 truncate">{p.client_name}{p.description ? ` · ${p.description}` : ''}</p>
 				</div>
-				<div class="flex items-center gap-2 shrink-0 flex-wrap">
+
+				<div class="relative z-10 flex items-center gap-2 shrink-0">
 					<button
+						type="button"
 						data-share-url={`${siteUrl}freelance/view/${p.share_key}`}
 						onclick="navigator.clipboard.writeText(this.dataset.shareUrl).then(()=>{this.textContent='Copied!';setTimeout(()=>{this.textContent='Share link'},1500)})"
-						class="rounded-full border border-white/12 bg-white/5 px-3 py-1.5 text-xs text-white/50 transition hover:text-white/80"
+						class="rounded-full border border-white/22 bg-white/10 px-3 py-1.5 text-xs font-medium text-white/85 transition hover:bg-white/16 hover:border-white/30"
 					>
 						Share link
 					</button>
-					<a href={`/freelance/admin/${p.id}`}
-						class="rounded-full border border-white/14 bg-white/8 px-3 py-1.5 text-xs font-medium text-white/80 transition hover:bg-white/14">
-						Open board →
-					</a>
 					<form method="POST" onsubmit="return confirm('Delete this project and all its tasks?')">
 						<input type="hidden" name="_action" value="delete" />
 						<input type="hidden" name="id" value={p.id} />
-						<button class="rounded-full border border-red-500/20 bg-red-500/5 px-3 py-1.5 text-xs text-red-400/55 transition hover:text-red-400/90">
+						<button
+							type="submit"
+							class="rounded-full border border-red-500/40 bg-red-500/12 px-3 py-1.5 text-xs font-medium text-red-400 transition hover:bg-red-500/20 hover:border-red-500/55"
+						>
 							Delete
 						</button>
 					</form>
+					<span class="pl-1 text-base text-white/40 leading-none select-none pointer-events-none">→</span>
 				</div>
 			</div>
 		))}

@@ -276,6 +276,492 @@ html.light .placeholder-white\/40 { color: rgba(0,0,0,0.30) !important; }
 /* Focus border */
 html.light .focus\:border-white\/25:focus { border-color: rgba(0,0,0,0.22) !important; }
 
+/* ── Light mode: accent colors (amber/emerald/blue) ─────────────────────────
+   Tailwind's *-300 shades are tuned for dark backgrounds and become unreadable
+   on light bg. Remap to darker shades with usable contrast.                  */
+
+/* Amber (WIP / Active / "Later" status) */
+html.light .text-amber-300,
+html.light .text-amber-300\/85,
+html.light .text-amber-300\/80,
+html.light .text-amber-300\/75,
+html.light .text-amber-300\/70 { color: #b45309 !important; } /* amber-700 */
+html.light .text-amber-300\/65,
+html.light .text-amber-300\/60,
+html.light .text-amber-300\/55 { color: #c2750b !important; }
+html.light .text-amber-200    { color: #92400e !important; } /* amber-800 */
+
+html.light .bg-amber-300\/4,
+html.light .bg-amber-300\/5,
+html.light .bg-amber-300\/8,
+html.light .bg-amber-300\/10,
+html.light .bg-amber-300\/12,
+html.light .bg-amber-300\/15,
+html.light .bg-amber-300\/\[0\.03\],
+html.light .bg-amber-300\/\[0\.04\],
+html.light .bg-amber-300\/\[0\.06\] { background-color: rgba(180, 83, 9, 0.08) !important; }
+
+html.light .border-amber-300\/15,
+html.light .border-amber-300\/20,
+html.light .border-amber-300\/25,
+html.light .border-amber-300\/30,
+html.light .border-amber-300\/45 { border-color: rgba(180, 83, 9, 0.32) !important; }
+
+/* Emerald (Done / "Do now" status / savings callout) */
+html.light .text-emerald-400,
+html.light .text-emerald-400\/85,
+html.light .text-emerald-400\/80,
+html.light .text-emerald-400\/75,
+html.light .text-emerald-400\/70 { color: #047857 !important; } /* emerald-700 */
+html.light .text-emerald-400\/65,
+html.light .text-emerald-400\/60,
+html.light .text-emerald-400\/55 { color: #059669 !important; }
+html.light .text-emerald-300,
+html.light .text-emerald-300\/85,
+html.light .text-emerald-300\/75,
+html.light .text-emerald-300\/70 { color: #047857 !important; }
+
+html.light .bg-emerald-400\/4,
+html.light .bg-emerald-400\/5,
+html.light .bg-emerald-400\/8,
+html.light .bg-emerald-400\/10,
+html.light .bg-emerald-400\/12,
+html.light .bg-emerald-400\/15,
+html.light .bg-emerald-400\/\[0\.04\],
+html.light .bg-emerald-400\/\[0\.06\] { background-color: rgba(4, 120, 87, 0.08) !important; }
+
+html.light .border-emerald-400\/12,
+html.light .border-emerald-400\/15,
+html.light .border-emerald-400\/20,
+html.light .border-emerald-400\/25,
+html.light .border-emerald-400\/30,
+html.light .border-emerald-400\/45 { border-color: rgba(4, 120, 87, 0.32) !important; }
+
+/* Extra white shades used by project list rows */
+html.light .bg-white\/\[0\.03\] { background-color: rgba(0,0,0,0.03) !important; }
+html.light .border-white\/30   { border-color: rgba(0,0,0,0.18) !important; }
+html.light .hover\:bg-white\/16:hover { background-color: rgba(0,0,0,0.09) !important; }
+html.light .hover\:border-white\/30:hover { border-color: rgba(0,0,0,0.20) !important; }
+
+/* ── Item row state via data-row-status (drives optimistic updates) ────── */
+.item-row { transition: border-color 120ms, background-color 120ms, opacity 120ms; }
+.item-row .item-text { transition: color 120ms, text-decoration-color 120ms; }
+
+.item-row[data-row-status="yes"],
+.item-row[data-row-status="do_now"] {
+	border-color: rgba(52, 211, 153, 0.30) !important;
+	background-color: rgba(52, 211, 153, 0.05) !important;
+	opacity: 1 !important;
+}
+.item-row[data-row-status="done"] {
+	border-color: rgba(52, 211, 153, 0.30) !important;
+	background-color: rgba(52, 211, 153, 0.07) !important;
+	opacity: 1 !important;
+}
+.item-row[data-row-status="done"] .item-text {
+	text-decoration: line-through;
+	color: rgba(255,255,255,0.55);
+}
+.item-row[data-row-status="later"] {
+	border-color: rgba(252, 211, 77, 0.30) !important;
+	background-color: rgba(252, 211, 77, 0.05) !important;
+	opacity: 1 !important;
+}
+.item-row[data-row-status="no"],
+.item-row[data-row-status="skip"] {
+	border-color: rgba(255, 255, 255, 0.08) !important;
+	background-color: rgba(255, 255, 255, 0.02) !important;
+	opacity: 0.55 !important;
+}
+.item-row[data-row-status="no"] .item-text,
+.item-row[data-row-status="skip"] .item-text {
+	text-decoration: line-through;
+	color: rgba(255,255,255,0.45);
+}
+.item-row[data-row-status=""] {
+	border-color: rgba(255, 255, 255, 0.10) !important;
+	background-color: rgba(255, 255, 255, 0.02) !important;
+	opacity: 1 !important;
+}
+.item-row[data-row-status=""] .item-text {
+	text-decoration: none;
+	color: rgba(255,255,255,0.85);
+}
+
+/* Light-mode equivalents */
+html.light .item-row[data-row-status="yes"],
+html.light .item-row[data-row-status="do_now"],
+html.light .item-row[data-row-status="done"] {
+	border-color: rgba(4, 120, 87, 0.30) !important;
+	background-color: rgba(4, 120, 87, 0.07) !important;
+}
+html.light .item-row[data-row-status="done"] .item-text {
+	color: rgba(0,0,0,0.55);
+}
+html.light .item-row[data-row-status="later"] {
+	border-color: rgba(180, 83, 9, 0.32) !important;
+	background-color: rgba(180, 83, 9, 0.07) !important;
+}
+html.light .item-row[data-row-status="no"],
+html.light .item-row[data-row-status="skip"] {
+	border-color: rgba(0,0,0,0.08) !important;
+	background-color: rgba(0,0,0,0.02) !important;
+}
+html.light .item-row[data-row-status="no"] .item-text,
+html.light .item-row[data-row-status="skip"] .item-text {
+	color: rgba(0,0,0,0.45);
+}
+html.light .item-row[data-row-status=""] {
+	border-color: rgba(0,0,0,0.07) !important;
+	background-color: rgba(0,0,0,0.02) !important;
+}
+html.light .item-row[data-row-status=""] .item-text {
+	color: rgba(0,0,0,0.85);
+}
+
+/* Status pill active/inactive via data-active */
+[data-pill] { transition: background-color 120ms, border-color 120ms, color 120ms; }
+
+[data-pill][data-active="false"] {
+	border-color: rgba(255, 255, 255, 0.10) !important;
+	background-color: rgba(255, 255, 255, 0.04) !important;
+	color: rgba(255, 255, 255, 0.45) !important;
+}
+html.light [data-pill][data-active="false"] {
+	border-color: rgba(0, 0, 0, 0.10) !important;
+	background-color: rgba(0, 0, 0, 0.03) !important;
+	color: rgba(0, 0, 0, 0.50) !important;
+}
+
+[data-pill="yes"][data-active="true"],
+[data-pill="do_now"][data-active="true"] {
+	border-color: rgba(52, 211, 153, 0.45) !important;
+	background-color: rgba(52, 211, 153, 0.15) !important;
+	color: rgb(110, 231, 183) !important;
+}
+html.light [data-pill="yes"][data-active="true"],
+html.light [data-pill="do_now"][data-active="true"] {
+	border-color: rgba(4, 120, 87, 0.45) !important;
+	background-color: rgba(4, 120, 87, 0.15) !important;
+	color: rgb(4, 120, 87) !important;
+}
+
+[data-pill="later"][data-active="true"] {
+	border-color: rgba(252, 211, 77, 0.45) !important;
+	background-color: rgba(252, 211, 77, 0.15) !important;
+	color: rgb(254, 215, 137) !important;
+}
+html.light [data-pill="later"][data-active="true"] {
+	border-color: rgba(180, 83, 9, 0.45) !important;
+	background-color: rgba(180, 83, 9, 0.15) !important;
+	color: rgb(180, 83, 9) !important;
+}
+
+[data-pill="no"][data-active="true"],
+[data-pill="skip"][data-active="true"] {
+	border-color: rgba(255, 255, 255, 0.22) !important;
+	background-color: rgba(255, 255, 255, 0.10) !important;
+	color: rgba(255, 255, 255, 0.75) !important;
+}
+html.light [data-pill="no"][data-active="true"],
+html.light [data-pill="skip"][data-active="true"] {
+	border-color: rgba(0, 0, 0, 0.22) !important;
+	background-color: rgba(0, 0, 0, 0.10) !important;
+	color: rgba(0, 0, 0, 0.75) !important;
+}
+
+/* Task checkbox: respects data-row-status="done" */
+.item-row[data-row-status="done"] .task-check {
+	border-color: rgba(52, 211, 153, 0.55) !important;
+	background-color: rgba(52, 211, 153, 0.18) !important;
+	color: rgb(110, 231, 183) !important;
+}
+html.light .item-row[data-row-status="done"] .task-check {
+	border-color: rgba(4, 120, 87, 0.55) !important;
+	background-color: rgba(4, 120, 87, 0.18) !important;
+	color: rgb(4, 120, 87) !important;
+}
+.item-row[data-row-status=""] .task-check,
+.item-row:not([data-row-status="done"]) .task-check {
+	color: transparent !important;
+}
+
+/* ── Section card: view ⇄ edit toggle ───────────────────────────────────── */
+.section-card .section-editor { display: none; }
+.section-card.editing .section-view { display: none; }
+.section-card.editing .section-editor { display: block; }
+
+/* ── Title edit toggle (admin) ──────────────────────────────────────────── */
+[data-title-block] .title-editor { display: none; }
+[data-title-block].editing .title-view { display: none; }
+[data-title-block].editing .title-editor { display: flex; }
+
+/* ── Deadline edit toggle (admin work board) ────────────────────────────── */
+[data-deadline-block] .deadline-editor { display: none; }
+[data-deadline-block].editing .deadline-view { display: none; }
+[data-deadline-block].editing .deadline-editor { display: flex; }
+
+/* ── Kanban work board ──────────────────────────────────────────────────── */
+/* Card colors driven by their parent column so DnD reorders the visuals automatically. */
+.kanban-col[data-drop-col="todo"] .kanban-card {
+	border-color: rgba(255, 255, 255, 0.10) !important;
+	background-color: rgba(255, 255, 255, 0.04) !important;
+}
+.kanban-col[data-drop-col="doing"] .kanban-card {
+	border-color: rgba(252, 211, 77, 0.25) !important;
+	background-color: rgba(252, 211, 77, 0.06) !important;
+}
+.kanban-col[data-drop-col="done"] .kanban-card {
+	border-color: rgba(52, 211, 153, 0.25) !important;
+	background-color: rgba(52, 211, 153, 0.06) !important;
+}
+html.light .kanban-col[data-drop-col="todo"] .kanban-card {
+	border-color: rgba(0, 0, 0, 0.08) !important;
+	background-color: rgba(0, 0, 0, 0.02) !important;
+}
+html.light .kanban-col[data-drop-col="doing"] .kanban-card {
+	border-color: rgba(180, 83, 9, 0.30) !important;
+	background-color: rgba(180, 83, 9, 0.06) !important;
+}
+html.light .kanban-col[data-drop-col="done"] .kanban-card {
+	border-color: rgba(4, 120, 87, 0.30) !important;
+	background-color: rgba(4, 120, 87, 0.06) !important;
+}
+
+.kanban-list {
+	transition: background 150ms ease, outline 150ms ease;
+}
+.kanban-list.drop-target {
+	background: rgba(255, 255, 255, 0.05);
+	outline: 1.5px dashed rgba(255, 255, 255, 0.22);
+	outline-offset: -2px;
+}
+html.light .kanban-list.drop-target {
+	background: rgba(0, 0, 0, 0.04);
+	outline-color: rgba(0, 0, 0, 0.22);
+}
+.kanban-card.dragging {
+	opacity: 0.4;
+	transform: rotate(1.5deg) scale(0.98);
+}
+.kanban-card {
+	transition: transform 120ms ease, box-shadow 150ms ease, border-color 150ms ease;
+}
+.kanban-card:hover {
+	transform: translateY(-1px);
+}
+
+/* ── Note dot trigger ───────────────────────────────────────────────────── */
+.note-trigger {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 6px 4px;
+	background: transparent;
+	border: 0;
+	cursor: pointer;
+	margin-left: 4px;
+}
+.note-dot {
+	display: inline-block;
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: var(--text-3);
+	transition: background 120ms ease, transform 120ms ease;
+}
+.note-trigger:hover .note-dot { transform: scale(1.4); }
+.note-dot.has-note { background: #f59e0b; }
+
+/* Note popover — positioned by JS, hidden until shown. */
+.note-popover {
+	position: fixed;
+	width: 360px;
+	max-width: calc(100vw - 32px);
+	z-index: 100;
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	background: var(--surface);
+	backdrop-filter: blur(20px);
+	-webkit-backdrop-filter: blur(20px);
+	padding: 12px;
+	box-shadow: 0 16px 48px rgba(0,0,0,0.25), 0 4px 16px rgba(0,0,0,0.10);
+	left: 0;
+	top: 0;
+}
+html.light .note-popover {
+	background: rgba(255,255,255,0.98);
+	box-shadow: 0 16px 48px rgba(0,0,0,0.14), 0 4px 16px rgba(0,0,0,0.06);
+}
+.note-popover[hidden] { display: none !important; }
+html.light .note-panel { background: rgba(255,255,255,0.97); }
+@media (max-width: 640px) {
+	.note-preview { display: none !important; }
+}
+
+/* ── Use case flow (rendered when a section.kind === 'usecase' contains arrows) ── */
+.usecase-flow {
+	list-style: none;
+	padding: 0;
+	margin: 18px 0 4px;
+	display: flex;
+	flex-direction: column;
+}
+.usecase-step {
+	display: flex;
+	align-items: flex-start;
+	gap: 14px;
+	padding: 6px 0;
+	position: relative;
+}
+.usecase-step:not(:last-child)::after {
+	content: '';
+	position: absolute;
+	left: 13px;
+	top: 32px;
+	bottom: -2px;
+	width: 1.5px;
+	background: var(--border);
+}
+.usecase-num {
+	flex-shrink: 0;
+	width: 26px;
+	height: 26px;
+	border-radius: 50%;
+	background: var(--surface);
+	border: 1px solid var(--border);
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 11px;
+	font-weight: 600;
+	color: var(--text-2);
+	z-index: 1;
+	font-variant-numeric: tabular-nums;
+}
+.usecase-text {
+	margin: 4px 0 0;
+	font-size: 13px;
+	line-height: 1.55;
+	color: var(--text-2);
+}
+
+/* ── Stage dropdown ──────────────────────────────────────────────────────── */
+.stage-dropdown {
+	position: relative;
+	display: inline-block;
+}
+.stage-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 12px;
+	border-radius: 8px;
+	border: 1px solid;
+	font-size: 12px;
+	font-weight: 500;
+	cursor: pointer;
+	user-select: none;
+	white-space: nowrap;
+	transition: filter 150ms ease, transform 80ms ease;
+	list-style: none;
+}
+.stage-pill::-webkit-details-marker { display: none; }
+.stage-pill::marker { display: none; }
+.stage-pill:hover { filter: brightness(1.1); }
+.stage-pill:active { transform: scale(0.98); }
+.stage-pill .chevron {
+	font-size: 9px;
+	opacity: 0.7;
+	transition: transform 150ms ease;
+	display: inline-block;
+}
+.stage-dropdown[open] .stage-pill .chevron { transform: rotate(180deg); }
+
+.stage-menu {
+	position: absolute;
+	top: calc(100% + 6px);
+	left: 0;
+	min-width: 220px;
+	border-radius: 12px;
+	border: 1px solid var(--border);
+	background: var(--surface);
+	backdrop-filter: blur(24px);
+	-webkit-backdrop-filter: blur(24px);
+	padding: 4px;
+	z-index: 50;
+	box-shadow: 0 12px 32px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.08);
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+}
+html.light .stage-menu {
+	background: rgba(255,255,255,0.96);
+	box-shadow: 0 12px 32px rgba(0,0,0,0.10), 0 2px 8px rgba(0,0,0,0.05);
+}
+
+.stage-option {
+	display: flex;
+	width: 100%;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 9px 12px;
+	border-radius: 8px;
+	background: transparent;
+	border: 0;
+	font-size: 13px;
+	color: var(--text-1);
+	cursor: pointer;
+	text-align: left;
+	transition: background 100ms ease;
+	font-family: inherit;
+}
+.stage-option:hover { background: var(--surface-hover); }
+.stage-option.is-active { font-weight: 600; }
+.stage-check {
+	font-size: 11px;
+	color: #047857;
+	opacity: 0.85;
+}
+html.light .stage-check { color: #047857; }
+
+/* Red (Delete button) */
+html.light .text-red-400,
+html.light .text-red-400\/90,
+html.light .text-red-400\/85,
+html.light .text-red-400\/80 { color: #b91c1c !important; } /* red-700 */
+html.light .text-red-400\/70,
+html.light .text-red-400\/60,
+html.light .text-red-400\/55 { color: #c2410c !important; }
+
+html.light .bg-red-500\/5,
+html.light .bg-red-500\/8,
+html.light .bg-red-500\/10,
+html.light .bg-red-500\/12 { background-color: rgba(185, 28, 28, 0.08) !important; }
+html.light .bg-red-500\/16,
+html.light .bg-red-500\/20 { background-color: rgba(185, 28, 28, 0.13) !important; }
+html.light .hover\:bg-red-500\/20:hover { background-color: rgba(185, 28, 28, 0.15) !important; }
+
+html.light .border-red-500\/20,
+html.light .border-red-500\/25,
+html.light .border-red-500\/30,
+html.light .border-red-500\/40 { border-color: rgba(185, 28, 28, 0.32) !important; }
+html.light .border-red-500\/55,
+html.light .hover\:border-red-500\/55:hover { border-color: rgba(185, 28, 28, 0.45) !important; }
+
+/* Blue (Offer status / client activity) */
+html.light .text-blue-300,
+html.light .text-blue-300\/85,
+html.light .text-blue-300\/80,
+html.light .text-blue-300\/75,
+html.light .text-blue-300\/70 { color: #1d4ed8 !important; } /* blue-700 */
+
+html.light .bg-blue-400\/8,
+html.light .bg-blue-400\/10 { background-color: rgba(29, 78, 216, 0.08) !important; }
+
+html.light .border-blue-400\/25 { border-color: rgba(29, 78, 216, 0.32) !important; }
+
 /* ── BrainMap shadow fixes (light mode) ─────────────────────────────────── */
 html.light #brainmap-vignette-dark {
 	/* Dark bottom vignette looks wrong on light bg */

@@ -1,6 +1,22 @@
 ---
 import Base from '../../../layouts/Base.astro';
 import { supabase } from '../../../lib/supabase';
+import {
+	deriveItemStates,
+	deriveSectionEdits,
+	computeScopeTotals,
+	formatMoney,
+	parseUsecaseSteps,
+	getItemLinks,
+	mapStatusForCascade,
+	defaultItemKind,
+	t,
+	type OfferDoc,
+	type OfferEvent,
+	type ItemStatus,
+	type ItemKind,
+	type OfferLang,
+} from '../../../lib/offerDoc';
 
 const { key } = Astro.params;
 
@@ -11,6 +27,120 @@ const { data: project } = await supabase
 	.single();
 
 if (!project) return Astro.redirect('/freelance');
+
+// ── Client POST handlers ────────────────────────────────────────────────────
+if (Astro.request.method === 'POST') {
+	const data = await Astro.request.formData();
+	const action = data.get('_action')?.toString();
+	const projectId = project.id;
+
+	// Re-fetch latest events to compute "before" snapshots for diff payloads.
+	const { data: priorEvents } = await supabase
+		.from('offer_events')
+		.select('*')
+		.eq('project_id', projectId)
+		.order('created_at', { ascending: true });
+	const priorStates = deriveItemStates((priorEvents ?? []) as OfferEvent[]);
+
+	if (action === 'set-item-status') {
+		const item_id = data.get('item_id')?.toString() ?? '';
+		const next    = data.get('status')?.toString() ?? '';
+		const valid: ItemStatus[] = ['do_now', 'later', 'skip', 'yes', 'no', 'done'];
+		const before = priorStates.get(item_id)?.status ?? null;
+		// Toggle off if clicking the active one.
+		const to: ItemStatus | null = (valid.includes(next as ItemStatus) && next !== before)
+			? (next as ItemStatus)
+			: null;
+		if (item_id && to !== before) {
+			await supabase.from('offer_events').insert({
+				project_id: projectId, actor: 'client', kind: 'item_status',
+				ref: item_id, payload: { from: before, to },
+			});
+			// Cascade: propagate (mapped) status to all linked items.
+			const docNow = (project.offer_doc as OfferDoc | null) ?? null;
+			const linked = getItemLinks(docNow, item_id);
+			const cascadedStatus = mapStatusForCascade(to);
+			if (cascadedStatus !== null) {
+				for (const linkedId of linked) {
+					const beforeLinked = priorStates.get(linkedId)?.status ?? null;
+					if (cascadedStatus !== beforeLinked) {
+						await supabase.from('offer_events').insert({
+							project_id: projectId, actor: 'client', kind: 'item_status',
+							ref: linkedId, payload: { from: beforeLinked, to: cascadedStatus, linked_from: item_id },
+						});
+					}
+				}
+			}
+		}
+
+	} else if (action === 'set-item-note') {
+		const item_id = data.get('item_id')?.toString() ?? '';
+		const after   = (data.get('note')?.toString() ?? '').trim();
+		const before  = priorStates.get(item_id)?.note ?? '';
+		if (item_id && after !== before) {
+			await supabase.from('offer_events').insert({
+				project_id: projectId, actor: 'client', kind: 'item_note',
+				ref: item_id, payload: { before, after },
+			});
+		}
+
+	} else if (action === 'add-comment') {
+		const text = (data.get('text')?.toString() ?? '').trim();
+		if (text) {
+			await supabase.from('offer_events').insert({
+				project_id: projectId, actor: 'client', kind: 'comment',
+				ref: null, payload: { text },
+			});
+		}
+
+	} else if (action === 'add-scope-item') {
+		const text = (data.get('text')?.toString() ?? '').trim();
+		const docNow = (project.offer_doc as OfferDoc | null) ?? null;
+		// Only allowed during WIP and when a doc with a scope exists.
+		if (text && docNow && (project.offer_is_wip ?? true) && docNow.scope) {
+			const newId = 'scope_' + Math.random().toString(36).slice(2, 10);
+			const newItem = { id: newId, text, hours: 0 };
+			const updatedDoc = {
+				...docNow,
+				scope: {
+					...docNow.scope,
+					items: [...(docNow.scope.items ?? []), newItem],
+				},
+			};
+			await supabase.from('projects').update({ offer_doc: updatedDoc }).eq('id', projectId);
+			await supabase.from('offer_events').insert({
+				project_id: projectId, actor: 'client', kind: 'comment',
+				ref: null, payload: { text: `[client added scope item] ${text}` },
+			});
+		}
+
+	} else if (action === 'set-section-body') {
+		const section_id = data.get('section_id')?.toString() ?? '';
+		// Accept either a raw body or a structured intro+steps form.
+		const rawBody = data.get('body')?.toString();
+		let after: string;
+		if (typeof rawBody === 'string' && rawBody.length > 0) {
+			after = rawBody.trim();
+		} else {
+			const intro = (data.get('intro')?.toString() ?? '').trim();
+			const steps = data.getAll('step').map((s) => s.toString().trim()).filter(Boolean);
+			const stepsLine = steps.join(' → ');
+			after = intro && stepsLine ? `${intro}\n\n${stepsLine}` : (stepsLine || intro);
+		}
+		const prior = deriveSectionEdits((priorEvents ?? []) as OfferEvent[]).get(section_id);
+		const docNow = (project.offer_doc as OfferDoc | null) ?? null;
+		const originalBody = docNow?.sections.find((s) => s.id === section_id)?.body ?? '';
+		const before = prior ?? originalBody;
+		if (section_id && after !== before) {
+			await supabase.from('offer_events').insert({
+				project_id: projectId, actor: 'client', kind: 'section_edit',
+				ref: section_id, payload: { before, after },
+			});
+		}
+	}
+
+	return Astro.redirect(`/freelance/view/${key}`);
+}
 
 // Remember this client so /freelance auto-redirects them next time.
 // Set a 90-day cookie if they don't already have the right one.
@@ -28,48 +158,100 @@ const status: string = project.status ?? 'offer';
 const isOffer = status === 'offer';
 
 const title       = project.display_title || project.name;
-const deliverables: string[] = Array.isArray(project.deliverables) ? project.deliverables : [];
 
-// Board-mode data (only fetched when not offer)
-type Label = { id: string; name: string; color: string };
-type Task  = { id: string; title: string; description: string | null; status: 'todo' | 'doing' | 'done'; created_at: string; task_labels: { label_id: string }[] };
-type Group = { id: string; name: string; tasks: Task[] };
-let groups: Group[] = [];
-let labelMap = new Map<string, Label>();
-let totalTasks = 0;
-let doneTasks  = 0;
-let pct        = 0;
+// ── Offer doc loading ───────────────────────────────────────────────────────
+// We now load offer_doc + events for ALL stages (not just 'offer'), because
+// the active/done board is also derived from scope items.
+const offerDoc: OfferDoc | null = (project.offer_doc as OfferDoc | null) ?? null;
+const offerIsWip: boolean = project.offer_is_wip ?? true;
+const lang: OfferLang | undefined = offerDoc?.lang;
+const tx = (key: Parameters<typeof t>[1]) => t(lang, key);
+const hasDoc = !!(offerDoc && (
+	(offerDoc.sections && offerDoc.sections.length > 0) ||
+	(offerDoc.scope && (offerDoc.scope.items?.length ?? 0) > 0)
+));
 
-if (!isOffer) {
-	const [{ data: rawGroups }, { data: projectLabels }] = await Promise.all([
-		supabase
-			.from('task_groups')
-			.select('*, tasks(*, task_labels(label_id))')
-			.eq('project_id', project.id)
-			.order('created_at', { ascending: true }),
-		supabase
-			.from('labels')
-			.select('*')
-			.eq('project_id', project.id),
-	]);
+let docEvents: OfferEvent[] = [];
+let docItemStates = new Map<string, { status: ItemStatus | null; progress: 'todo' | 'doing' | 'done' | null; note: string }>();
+let docSectionEdits = new Map<string, string>();
+let comments: OfferEvent[] = [];
+let scopeTotals = null as ReturnType<typeof computeScopeTotals>;
 
-	labelMap = new Map((projectLabels ?? []).map((l: Label) => [l.id, l]));
-
-	groups = (rawGroups ?? []).map((g) => ({
-		...g,
-		tasks: (g.tasks ?? []).sort((a: Task, b: Task) =>
-			new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime()
-		),
-	}));
-
-	totalTasks = groups.reduce((n, g) => n + g.tasks.length, 0);
-	doneTasks  = groups.reduce((n, g) => n + g.tasks.filter((t) => t.status === 'done').length, 0);
-	pct        = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
+if (hasDoc) {
+	const { data: rawEvents } = await supabase
+		.from('offer_events')
+		.select('*')
+		.eq('project_id', project.id)
+		.order('created_at', { ascending: true });
+	docEvents = (rawEvents ?? []) as OfferEvent[];
+	docItemStates = deriveItemStates(docEvents);
+	docSectionEdits = deriveSectionEdits(docEvents);
+	comments = docEvents.filter((e) => e.kind === 'comment');
+	scopeTotals = computeScopeTotals(offerDoc!.scope, docItemStates);
 }
 
+// ── Active/done board: derived from scope items + their progress ────────────
+type WorkItem = {
+	id: string;
+	text: string;
+	hours: number;
+	clientStatus: 'do_now' | 'later' | 'skip' | null;
+	progress: 'todo' | 'doing' | 'done';
+};
+const workItems: WorkItem[] = ((offerDoc?.scope?.items) ?? [])
+	.map((it) => {
+		const st = docItemStates.get(it.id);
+		return {
+			id: it.id,
+			text: it.text,
+			hours: it.hours || 0,
+			clientStatus: (st?.status ?? null),
+			progress: (st?.progress ?? 'todo'),
+		} as WorkItem;
+	})
+	.filter((w) => w.clientStatus !== 'skip');
+
+// Pre-compute sorted sections for the offer view (usecase first).
+const SECTION_ORDER: Record<string, number> = { usecase: 0, questions: 1, checklist: 2, note: 3 };
+const sortedSections = offerDoc
+	? [...offerDoc.sections].sort(
+		(a, b) => (SECTION_ORDER[a.kind ?? 'questions'] ?? 99) - (SECTION_ORDER[b.kind ?? 'questions'] ?? 99)
+	)
+	: [];
+
+// Flat list of every item (scope + section items) so we can render
+// portal-style note popovers outside the row markup.
+type AnyItem = { id: string; text: string };
+const allItems: AnyItem[] = [];
+if (offerDoc) {
+	for (const it of offerDoc.scope?.items ?? []) allItems.push({ id: it.id, text: it.text });
+	for (const sec of offerDoc.sections) {
+		for (const it of sec.items ?? []) allItems.push({ id: it.id, text: it.text });
+	}
+}
+
+const totalTasks = workItems.length;
+const doneTasks  = workItems.filter((w) => w.progress === 'done').length;
+const pct        = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
+const doingItems = workItems.filter((w) => w.progress === 'doing');
+const doneItems  = workItems.filter((w) => w.progress === 'done');
+const todoItems  = workItems.filter((w) => w.progress === 'todo');
+
+function commentTimeAgo(iso: string): string {
+	const diff = Date.now() - new Date(iso).getTime();
+	const m = Math.floor(diff / 60000);
+	if (m < 1) return 'just now';
+	if (m < 60) return `${m}m ago`;
+	const h = Math.floor(m / 60);
+	if (h < 24) return `${h}h ago`;
+	const d = Math.floor(h / 24);
+	return `${d}d ago`;
+}
+
+
 const pageTitle = isOffer
-	? `Proposal for ${project.client_name} — Daniel Smidstrup`
-	: `${title} — Live Progress`;
+	? `Proposal for ${project.client_name} · Daniel Smidstrup`
+	: `${title} · Live Progress`;
 
 const pageDesc = isOffer
 	? `A freelance proposal from Daniel Smidstrup for ${project.client_name}.`
@@ -79,90 +261,442 @@ const pageDesc = isOffer
 <Base title={pageTitle} description={pageDesc}>
 <div class="mx-auto max-w-2xl px-4 py-14">
 
-{isOffer ? (
+{isOffer && hasDoc ? (
 	/* ════════════════════════════════════════════════
-	   OFFER VIEW
+	   STRUCTURED OFFER DOC VIEW
 	════════════════════════════════════════════════ */
 	<>
-		<!-- From / to header -->
-		<div class="mb-10">
-			<div class="mb-6 flex items-center gap-3 text-xs text-white/65">
+		<!-- Compact header -->
+		<div class="mb-8">
+			<div class="mb-3 flex items-center gap-2 text-[11px] text-white/45">
 				<span>Daniel Smidstrup</span>
-				<span class="text-white/15">→</span>
+				<span class="text-white/20">→</span>
 				<span>{project.client_name}</span>
 			</div>
+			<div class="flex items-baseline gap-3 flex-wrap">
+				<h1 class="text-3xl font-semibold tracking-tight text-white leading-tight">{title}</h1>
+				{offerIsWip && (
+					<span class="rounded-full border border-amber-300/30 bg-amber-300/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-300/85">
+						{tx('draft')}
+					</span>
+				)}
+			</div>
+		</div>
 
-			<p class="text-xs font-medium uppercase tracking-widest text-white/65">Proposal</p>
-			<h1 class="mt-2 text-3xl font-semibold tracking-tight text-white leading-tight">
-				{title}
-			</h1>
+		{offerIsWip && offerDoc!.intro && (
+			<div class="mb-6 text-sm text-white/70 leading-relaxed whitespace-pre-line">
+				{offerDoc!.intro}
+			</div>
+		)}
 
-			{project.description && (
-				<p class="mt-3 text-sm text-white/65">{project.description}</p>
-			)}
+		{offerIsWip && (
+			<div class="card mb-8 px-5 py-4 border-amber-300/15 bg-amber-300/[0.03]">
+				<p class="text-xs text-white/60 leading-relaxed">{tx('wip_banner')}</p>
+			</div>
+		)}
 
-			<!-- Timeline + price badges -->
-			{(project.timeline || project.price) && (
-				<div class="mt-5 flex flex-wrap gap-2">
-					{project.timeline && (
-						<span class="rounded-full border border-white/12 bg-white/5 px-3 py-1.5 text-xs text-white/55">
-							⏱ {project.timeline}
-						</span>
-					)}
-					{project.price && (
-						<span class="rounded-full border border-white/12 bg-white/5 px-3 py-1.5 text-xs text-white/55">
-							💶 {project.price}
-						</span>
+		{offerDoc!.scope && (offerDoc!.scope.items?.length ?? 0) > 0 && scopeTotals && (
+			<div class="card mb-8 p-5 border-white/12">
+				<div class="flex items-baseline justify-between gap-3 mb-1">
+					<p class="text-xs font-semibold uppercase tracking-widest text-white/65">{offerDoc!.scope.label || tx('scope_label')}</p>
+					{scopeTotals.rate > 0 && (
+						<p class="text-[11px] text-white/35">{formatMoney(scopeTotals.rate, scopeTotals.currency)} {tx('per_hour')} <span class="text-white/30">· {tx('excl_vat')}</span></p>
 					)}
 				</div>
-			)}
+				<p class="text-[11px] text-white/40 mb-4">{tx('scope_hint')}</p>
+
+				<ul class="flex flex-col gap-2 mb-5">
+					{offerDoc!.scope.items!.map((it, idx, arr) => {
+						const status = docItemStates.get(it.id)?.status ?? null;
+						const isLater = status === 'later';
+						const isSkip  = status === 'skip';
+						const isOff   = isSkip;
+						const prevGroup = idx > 0 ? arr[idx - 1].group : undefined;
+						const showGroupHeader = it.group && it.group !== prevGroup;
+						const isRequired = it.required === true;
+						// Required items are always "do_now" — clients can't defer them.
+						const visibleStatuses = isRequired
+							? (['do_now'] as const)
+							: (['do_now', 'later', 'skip'] as const);
+						return (
+							<>
+							{showGroupHeader && (
+								<li class="scope-group-header text-[10px] font-semibold uppercase tracking-[0.16em] text-white/40 mt-3 mb-1 first:mt-0">{it.group}</li>
+							)}
+							<li
+								class={`item-row scope-row flex items-center gap-3 rounded-lg px-3 py-2.5 transition ${
+									isSkip   ? 'opacity-50 bg-white/[0.01]'
+									: isLater ? 'bg-amber-300/[0.05]'
+									: 'bg-white/[0.02]'
+								}`}
+								data-item-row
+								data-item-id={it.id}
+								data-item-kind="choice"
+								data-row-status={isRequired ? '' : (status ?? '')}
+							>
+								<span class={`item-text flex-1 text-sm leading-snug ${isSkip ? 'line-through text-white/45' : isLater ? 'text-white/75' : 'text-white/85'}`}>
+									{it.text}
+								</span>
+								<span class={`shrink-0 text-xs tabular-nums ${isOff ? 'text-white/30' : 'text-white/50'}`}>
+									{it.hours}h
+								</span>
+								{!isRequired && (
+									<div class="shrink-0 flex items-center gap-1">
+										{(['do_now', 'later', 'skip'] as const).map((s) => {
+											const active = status === s || (s === 'do_now' && status === null);
+											const label = s === 'do_now' ? tx('do_now') : s === 'later' ? tx('later') : tx('skip');
+											const color = s === 'do_now'
+												? (active ? 'border-emerald-400/45 bg-emerald-400/15 text-emerald-300' : 'border-white/10 bg-white/4 text-white/40 hover:text-emerald-300/80')
+												: s === 'later'
+												? (active ? 'border-amber-300/45 bg-amber-300/15 text-amber-200' : 'border-white/10 bg-white/4 text-white/40 hover:text-amber-200/80')
+												: (active ? 'border-white/22 bg-white/10 text-white/70' : 'border-white/10 bg-white/4 text-white/40 hover:text-white/70');
+											return (
+												<form method="POST" class="inline">
+													<input type="hidden" name="_action" value="set-item-status" />
+													<input type="hidden" name="item_id" value={it.id} />
+													<input type="hidden" name="status" value={s} />
+													<button type="submit" data-pill={s} data-active={active ? 'true' : 'false'} class={`rounded-full border px-2 py-0.5 text-[10px] font-medium transition ${color}`}>
+														{label}
+													</button>
+												</form>
+											);
+										})}
+									</div>
+								)}
+							</li>
+							</>
+						);
+					})}
+				</ul>
+
+				{offerIsWip && (
+					<form method="POST" class="mt-3 mb-5 flex items-center gap-2">
+						<input type="hidden" name="_action" value="add-scope-item" />
+						<input
+							type="text"
+							name="text"
+							required
+							placeholder={tx('add_scope_placeholder')}
+							class="field text-xs flex-1"
+							style="padding:8px 12px;"
+						/>
+						<button type="submit" class="rounded-[8px] bg-white/10 border border-white/14 px-3 py-1.5 text-[11px] font-medium text-white/75 hover:bg-white/15 transition">
+							{tx('add_scope_item')}
+						</button>
+					</form>
+				)}
+
+				<!-- Totals -->
+				<div class="border-t border-white/[0.06] pt-4 flex flex-col gap-2">
+					{scopeTotals.fixedPrice > 0 ? (
+						<>
+							<!-- Estimate (small contextual line) -->
+							<div class="flex items-baseline justify-between text-xs text-white/45">
+								<span>{tx('estimated_work')}</span>
+								<span class="tabular-nums">
+									{scopeTotals.includedHours}h
+									{scopeTotals.rate > 0 && (
+										<span> · {tx('would_be')} {formatMoney(scopeTotals.wouldBe, scopeTotals.currency)}</span>
+									)}
+								</span>
+							</div>
+
+							<!-- Savings callout -->
+							{scopeTotals.savings > 0 && (
+								<div class="flex items-baseline justify-between rounded-lg border border-emerald-400/25 bg-emerald-400/[0.06] px-3 py-2">
+									<span class="text-xs text-emerald-300/85">{tx('you_save')}</span>
+									<span class="text-sm text-emerald-300 font-semibold tabular-nums">
+										{formatMoney(scopeTotals.savings, scopeTotals.currency)}
+										{scopeTotals.savingsPct > 0 && <span class="text-emerald-300/70 font-normal"> · {scopeTotals.savingsPct}%</span>}
+									</span>
+								</div>
+							)}
+
+							<!-- Final price — big and prominent, the last thing -->
+							<div class="mt-2 rounded-xl border border-white/15 bg-white/[0.04] px-4 py-4 flex items-baseline justify-between gap-4">
+								<span class="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/60">{tx('your_price')}</span>
+								<span class="flex flex-col items-end leading-none">
+									<span class="text-3xl font-bold tracking-tight text-white tabular-nums">{formatMoney(scopeTotals.fixedPrice, scopeTotals.currency)}</span>
+									<span class="mt-1 text-[10px] uppercase tracking-wider text-white/40">{tx('excl_vat')}</span>
+								</span>
+							</div>
+						</>
+					) : (
+						<!-- No fixed price — show the hourly estimate as the prominent total -->
+						<div class="rounded-xl border border-white/15 bg-white/[0.04] px-4 py-4 flex items-baseline justify-between gap-4">
+							<span class="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/60">{tx('estimated_work')}</span>
+							<span class="flex flex-col items-end leading-none">
+								{scopeTotals.rate > 0 ? (
+									<>
+										<span class="text-3xl font-bold tracking-tight text-white tabular-nums">{formatMoney(scopeTotals.wouldBe, scopeTotals.currency)}</span>
+										<span class="mt-1 text-[10px] uppercase tracking-wider text-white/40">
+											{scopeTotals.includedHours}h × {formatMoney(scopeTotals.rate, scopeTotals.currency)} · {tx('excl_vat')}
+										</span>
+									</>
+								) : (
+									<span class="text-3xl font-bold tracking-tight text-white tabular-nums">{scopeTotals.includedHours}h</span>
+								)}
+							</span>
+						</div>
+					)}
+				</div>
+			</div>
+		)}
+
+
+		<!-- Sections (sorted: usecase first, then questions / checklist / note) -->
+		<div class="flex flex-col gap-5">
+			{sortedSections.map((sec, idx) => {
+						const prevKind = idx > 0 ? sortedSections[idx - 1].kind : null;
+						const showHeader = sec.kind !== prevKind && (sec.kind === 'usecase' || sec.kind === 'questions');
+						const headerLabel = sec.kind === 'usecase' ? tx('use_case_header') : tx('questions_header');
+
+						const editedBody = docSectionEdits.get(sec.id);
+						const effectiveBody = editedBody ?? sec.body;
+						const flow = sec.kind === 'usecase' ? parseUsecaseSteps(effectiveBody) : null;
+						const editable = sec.kind === 'usecase';
+
+						return (
+							<>
+								{showHeader && (
+									<h3 class="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/35 mt-3 mb-[-8px]">{headerLabel}</h3>
+								)}
+								<div class="card p-5 section-card" data-section data-section-id={sec.id}>
+
+									<!-- Read-only view -->
+									<div class="section-view">
+										<div class="flex items-start justify-between gap-3">
+											<h2 class="text-base font-semibold text-white/85">{sec.title || 'Untitled'}</h2>
+											{editable && (
+												<button type="button" data-edit-toggle class="text-[11px] text-white/40 hover:text-white/75 transition">
+													{tx('edit_section')}
+												</button>
+											)}
+										</div>
+										{flow ? (
+											<>
+												{flow.intro && (
+													<p class="mt-2 text-sm text-white/60 leading-relaxed whitespace-pre-line">{flow.intro}</p>
+												)}
+												<ol class="usecase-flow">
+													{flow.steps.map((step, i) => (
+														<li class="usecase-step">
+															<span class="usecase-num">{i + 1}</span>
+															<p class="usecase-text">{step}</p>
+														</li>
+													))}
+												</ol>
+											</>
+										) : effectiveBody ? (
+											<p class="mt-2 text-sm text-white/60 leading-relaxed whitespace-pre-line">{effectiveBody}</p>
+										) : null}
+
+										{(sec.items?.length ?? 0) > 0 && (
+											<ul class="mt-5 flex flex-col gap-2.5">
+												{sec.items!.map((it) => {
+													const itemKind: ItemKind = it.kind ?? defaultItemKind(sec.kind);
+													const st = docItemStates.get(it.id);
+													const status = st?.status ?? null;
+													const note = st?.note ?? '';
+													const isYes = status === 'yes';
+													const isNo = status === 'no';
+													const isDone = status === 'done';
+													const positive = isYes || status === 'do_now';
+													const negative = isNo || status === 'skip';
+
+													const rowClass =
+														positive  ? 'border-emerald-400/25 bg-emerald-400/[0.04]'
+														: status === 'later' ? 'border-amber-300/25 bg-amber-300/[0.04]'
+														: negative  ? 'border-white/8 bg-white/[0.02] opacity-60'
+														: isDone    ? 'border-emerald-400/25 bg-emerald-400/[0.06]'
+														: 'border-white/10 bg-white/[0.02]';
+
+													const textClass = negative
+														? 'text-white/45 line-through'
+														: isDone
+														? 'text-white/55 line-through'
+														: 'text-white/85';
+
+													return (
+														<li
+															class={`item-row rounded-xl border p-3.5 transition flex items-start gap-3 ${rowClass}`}
+															data-item-row
+															data-item-id={it.id}
+															data-item-kind={itemKind}
+															data-row-status={status ?? ''}
+														>
+															<p class={`item-text flex-1 text-sm leading-snug ${textClass}`}>{it.text}</p>
+
+															<div class="shrink-0 flex items-center gap-1.5">
+																{itemKind === 'question' && (['yes', 'no'] as const).map((s) => {
+																	const active = status === s;
+																	const color = s === 'yes'
+																		? (active ? 'border-emerald-400/45 bg-emerald-400/15 text-emerald-300' : 'border-white/10 bg-white/4 text-white/45 hover:text-emerald-300/80')
+																		: (active ? 'border-white/22 bg-white/10 text-white/70' : 'border-white/10 bg-white/4 text-white/45 hover:text-white/70');
+																	return (
+																		<form method="POST" class="inline">
+																			<input type="hidden" name="_action" value="set-item-status" />
+																			<input type="hidden" name="item_id" value={it.id} />
+																			<input type="hidden" name="status" value={s} />
+																			<button type="submit" data-pill={s} data-active={active ? 'true' : 'false'} class={`rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition ${color}`}>
+																				{s === 'yes' ? tx('yes') : tx('no')}
+																			</button>
+																		</form>
+																	);
+																})}
+
+																{itemKind === 'task' && (
+																	<form method="POST" class="inline">
+																		<input type="hidden" name="_action" value="set-item-status" />
+																		<input type="hidden" name="item_id" value={it.id} />
+																		<input type="hidden" name="status" value="done" />
+																		<button type="submit" aria-label={tx('mark_done')} class={`task-check flex h-5 w-5 items-center justify-center rounded-md border-2 transition ${
+																			isDone
+																				? 'border-emerald-500/55 bg-emerald-500/15 text-emerald-400'
+																				: 'border-white/30 bg-white/5 text-transparent hover:border-white/55 hover:bg-white/10'
+																		}`}>
+																			<span class="text-[12px] leading-none font-bold">✓</span>
+																		</button>
+																	</form>
+																)}
+
+																{itemKind === 'choice' && (['do_now', 'later', 'skip'] as const).map((s) => {
+																	const active = status === s;
+																	const label = s === 'do_now' ? tx('do_now') : s === 'later' ? tx('later') : tx('skip');
+																	const color = s === 'do_now'
+																		? (active ? 'border-emerald-400/45 bg-emerald-400/15 text-emerald-300' : 'border-white/10 bg-white/4 text-white/45 hover:text-emerald-300/80')
+																		: s === 'later'
+																		? (active ? 'border-amber-300/45 bg-amber-300/15 text-amber-200' : 'border-white/10 bg-white/4 text-white/45 hover:text-amber-200/80')
+																		: (active ? 'border-white/22 bg-white/10 text-white/70' : 'border-white/10 bg-white/4 text-white/45 hover:text-white/70');
+																	return (
+																		<form method="POST" class="inline">
+																			<input type="hidden" name="_action" value="set-item-status" />
+																			<input type="hidden" name="item_id" value={it.id} />
+																			<input type="hidden" name="status" value={s} />
+																			<button type="submit" data-pill={s} data-active={active ? 'true' : 'false'} class={`rounded-full border px-2 py-0.5 text-[10px] font-medium transition ${color}`}>{label}</button>
+																		</form>
+																	);
+																})}
+
+																<!-- Note dot trigger -->
+																<button
+																	type="button"
+																	class="note-trigger"
+																	data-note-trigger
+																	data-target={`note-${it.id}`}
+																	aria-label={tx('add_note')}
+																>
+																	<span class={`note-dot ${note ? 'has-note' : ''}`}></span>
+																</button>
+															</div>
+														</li>
+													);
+												})}
+											</ul>
+										)}
+									</div>
+
+									<!-- Structured editor (use case only) -->
+									{editable && (
+										<form method="POST" class="section-editor">
+											<input type="hidden" name="_action" value="set-section-body" />
+											<input type="hidden" name="section_id" value={sec.id} />
+											<div class="flex items-center justify-between gap-3 mb-4">
+												<h2 class="text-base font-semibold text-white/85">{sec.title || 'Untitled'}</h2>
+												<button type="button" data-edit-toggle class="text-[11px] text-white/45 hover:text-white/80 transition">{tx('cancel')}</button>
+											</div>
+											<label class="flex flex-col gap-1.5 mb-4">
+												<span class="text-[10px] uppercase tracking-wider text-white/40">Intro</span>
+												<textarea name="intro" rows={2} class="field text-xs leading-relaxed resize-y">{flow?.intro ?? ''}</textarea>
+											</label>
+											<div data-step-list class="flex flex-col gap-2 mb-3">
+												{(flow?.steps ?? []).map((step, i) => (
+													<div class="step-row flex items-center gap-2">
+														<span class="usecase-num shrink-0">{i + 1}</span>
+														<input type="text" name="step" value={step} class="field text-xs flex-1" />
+														<button type="button" class="step-remove text-white/30 hover:text-red-400 text-base leading-none w-6 h-6 flex items-center justify-center" aria-label={tx('remove_step')}>×</button>
+													</div>
+												))}
+											</div>
+											<p class="text-[10px] text-white/30 mb-3">{tx('edit_section_hint')}</p>
+											<div class="flex items-center gap-2">
+												<button type="button" data-add-step class="rounded-full border border-white/14 bg-white/8 px-3 py-1.5 text-[11px] text-white/70 hover:bg-white/14 transition">{tx('add_step')}</button>
+												<button type="submit" class="ml-auto rounded-[8px] bg-white px-3 py-1.5 text-xs font-semibold text-black hover:opacity-90 transition">{tx('save')}</button>
+											</div>
+										</form>
+									)}
+								</div>
+							</>
+						);
+					})}
 		</div>
 
-		<!-- Offer summary -->
-		{project.offer_summary && (
-			<div class="card mb-8 p-6">
-				<p class="text-xs font-semibold uppercase tracking-widest text-white/65 mb-3">Scope &amp; approach</p>
-				<p class="text-sm text-white/65 leading-relaxed whitespace-pre-line">{project.offer_summary}</p>
+		{offerDoc!.outro && (
+			<div class="mt-8 text-sm text-white/70 leading-relaxed whitespace-pre-line">
+				{offerDoc!.outro}
 			</div>
 		)}
 
-		<!-- Deliverables -->
-		{deliverables.length > 0 && (
-			<div class="mb-8 flex flex-col gap-2">
-				{deliverables.map((item, i) => (
-					<div class="card flex items-center gap-4 px-5 py-3.5">
-						<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-400/10 text-[11px] font-semibold text-emerald-400/70">
-							{i + 1}
-						</span>
-						<span class="text-sm text-white/80 leading-snug">{item}</span>
-					</div>
-				))}
-			</div>
-		)}
+		<!-- Note popovers (one per item, hidden by default, opened via JS) -->
+		{allItems.map((it) => {
+			const note = docItemStates.get(it.id)?.note ?? '';
+			return (
+				<div id={`note-${it.id}`} class="note-popover" data-note-popover hidden>
+					<form method="POST" class="flex flex-col gap-2">
+						<input type="hidden" name="_action" value="set-item-note" />
+						<input type="hidden" name="item_id" value={it.id} />
+						<p class="text-[10px] uppercase tracking-wider text-white/40 mb-1">{it.text.slice(0, 60)}{it.text.length > 60 ? '…' : ''}</p>
+						<textarea name="note" rows={4} class="field text-xs leading-relaxed resize-y" placeholder={tx('note_placeholder')}>{note}</textarea>
+						<div class="flex items-center justify-end gap-2 mt-1">
+							<button type="button" data-note-cancel class="text-[11px] text-white/45 hover:text-white/80 transition">{tx('cancel')}</button>
+							<button type="submit" class="rounded-[8px] bg-white px-3 py-1.5 text-xs font-semibold text-black hover:opacity-90 transition">{tx('save')}</button>
+						</div>
+					</form>
+				</div>
+			);
+		})}
 
-		<!-- CTA -->
-		<div class="card p-6">
-			<p class="text-sm text-white/55 leading-relaxed">
-				Questions, changes, or ready to kick things off? Reach out directly.
-			</p>
-			<div class="mt-5 flex flex-wrap gap-3">
-				<a
-					href="mailto:daniel@danielsmidstrup.com"
-					class="inline-flex items-center rounded-full border border-white/14 bg-white/8 px-4 py-2.5 text-sm font-medium text-white/90 transition hover:bg-white/14"
-				>
-					Email Daniel
-				</a>
-				<a
-					href="https://www.linkedin.com/in/daniel-smidstrup-b98390226/"
-					target="_blank"
-					rel="noopener noreferrer"
-					class="inline-flex items-center rounded-full border border-white/12 bg-white/5 px-4 py-2.5 text-sm text-white/55 transition hover:text-white/80"
-				>
-					LinkedIn
-				</a>
-			</div>
+		<!-- Comments thread -->
+		<div class="mt-10 card p-5">
+			<p class="text-xs font-semibold uppercase tracking-widest text-white/55 mb-3">{tx('comments')}</p>
+			{comments.length === 0 ? (
+				<p class="text-xs text-white/30 italic mb-4">{tx('no_comments')}</p>
+			) : (
+				<ul class="flex flex-col gap-3 mb-4">
+					{comments.map((c) => (
+						<li class="rounded-xl border border-white/8 bg-white/[0.03] px-4 py-3">
+							<div class="flex items-baseline justify-between gap-3">
+								<span class={`text-[10px] uppercase tracking-wider font-semibold ${c.actor === 'client' ? 'text-blue-300/75' : 'text-white/45'}`}>
+									{c.actor === 'client' ? tx('you') : tx('daniel')}
+								</span>
+								<span class="text-[10px] text-white/30">{commentTimeAgo(c.created_at)}</span>
+							</div>
+							<p class="mt-1.5 text-sm text-white/75 leading-relaxed whitespace-pre-line">{c.payload?.text ?? ''}</p>
+						</li>
+					))}
+				</ul>
+			)}
+			<form method="POST" class="flex flex-col gap-2">
+				<input type="hidden" name="_action" value="add-comment" />
+				<textarea name="text" rows={3} required placeholder={tx('write_comment')} class="field text-sm leading-relaxed resize-y"></textarea>
+				<button type="submit" class="self-start rounded-[10px] bg-white px-4 py-2 text-sm font-semibold text-black hover:opacity-90 transition">
+					{tx('post_comment')}
+				</button>
+			</form>
 		</div>
 	</>
+) : isOffer ? (
+	/* ════════════════════════════════════════════════
+	   NO OFFER DOC YET — coming soon placeholder
+	════════════════════════════════════════════════ */
+	<div class="card p-10 text-center">
+		<p class="text-xs font-semibold uppercase tracking-widest text-white/55">{tx('proposal')}</p>
+		<h1 class="mt-2 text-2xl font-semibold tracking-tight text-white">{title}</h1>
+		<p class="mt-4 text-sm text-white/55 leading-relaxed">
+			{tx('coming_soon')}{' '}
+			<a href="mailto:daniel@danielsmidstrup.com" class="text-white/80 underline decoration-white/20 hover:text-white transition">{tx('reach_out_directly')}</a>.
+		</p>
+	</div>
 ) : (
 	/* ════════════════════════════════════════════════
 	   ACTIVE / COMPLETED BOARD VIEW
@@ -174,7 +708,7 @@ const pageDesc = isOffer
 				<p class="text-xs font-medium uppercase tracking-widest text-white/55">Live Progress</p>
 				{status === 'completed' && (
 					<span class="rounded-full border border-emerald-400/25 bg-emerald-400/8 px-2.5 py-0.5 text-[11px] text-emerald-400/70">
-						Completed
+						{tx('completed')}
 					</span>
 				)}
 			</div>
@@ -200,105 +734,261 @@ const pageDesc = isOffer
 			)}
 		</div>
 
-		<!-- Groups / milestones -->
-		{groups.length === 0 && (
+		{workItems.length === 0 && (
 			<div class="card p-10 text-center">
-				<p class="text-sm text-white/65">Work is being planned — check back soon.</p>
+				<p class="text-sm text-white/65">{tx('work_planned')}</p>
 			</div>
 		)}
 
-		<div class="flex flex-col gap-5">
-			{groups.map((group) => {
-				const doneTasks  = group.tasks.filter((t) => t.status === 'done');
-				const doingTasks = group.tasks.filter((t) => t.status === 'doing');
-				const groupTotal = group.tasks.length;
-				const groupDone  = doneTasks.length;
-				const allDone    = groupTotal > 0 && groupDone === groupTotal;
-				const hasActive  = doingTasks.length > 0;
-
-				return (
-					<div class="card p-5">
-						<!-- Group header with milestone status -->
-						<div class="mb-4 flex items-center justify-between gap-3">
-							<div class="flex items-center gap-2.5">
-								<span class={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] ${
-									allDone
-										? 'bg-emerald-400/15 text-emerald-400/80'
-										: hasActive
-											? 'bg-amber-300/12 text-amber-300/70'
-											: 'bg-white/6 text-white/30'
-								}`}>
-									{allDone ? '✓' : hasActive ? '·' : '○'}
-								</span>
-								<h2 class="text-sm font-semibold text-white/75">{group.name}</h2>
-							</div>
-							{groupTotal > 0 && (
-								<span class={`text-xs ${allDone ? 'text-emerald-400/60' : 'text-white/35'}`}>
-									{groupDone}/{groupTotal} done
-								</span>
-							)}
+		{workItems.length > 0 && (
+			<div class="card p-5">
+				{doingItems.length > 0 && (
+					<div class="mb-5">
+						<p class="mb-2 text-[11px] font-semibold uppercase tracking-wider text-amber-300/70">{tx('in_progress')}</p>
+						<div class="flex flex-col gap-2">
+							{doingItems.map((w) => (
+								<div class="rounded-xl border border-amber-300/20 bg-amber-300/[0.04] p-3 flex items-start gap-3">
+									<p class="flex-1 text-sm text-white/85 leading-snug">{w.text}</p>
+									<span class="shrink-0 text-[11px] tabular-nums text-white/40">{w.hours}h</span>
+								</div>
+							))}
 						</div>
-
-						<!-- Active tasks (in progress) -->
-						{doingTasks.length > 0 && (
-							<div class="mb-3">
-								<p class="mb-2 text-[11px] font-semibold uppercase tracking-wider text-amber-300/60">In progress</p>
-								<div class="flex flex-col gap-2">
-									{doingTasks.map((task) => {
-										const tLabels = (task.task_labels ?? [])
-											.map((tl) => labelMap.get(tl.label_id))
-											.filter(Boolean) as Label[];
-										return (
-											<div class="rounded-xl border border-amber-300/15 bg-amber-300/4 p-3">
-												<p class="text-sm text-white/80 leading-snug">{task.title}</p>
-												{task.description && (
-													<p class="mt-1 text-xs text-white/40 leading-snug">{task.description}</p>
-												)}
-												{tLabels.length > 0 && (
-													<div class="mt-2 flex flex-wrap gap-1.5">
-														{tLabels.map((l) => (
-															<span
-																class="inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[11px] leading-none"
-																style={`border-color:${l.color}40;background:${l.color}15;color:${l.color}`}
-															>
-																<span class="h-1.5 w-1.5 rounded-full" style={`background:${l.color}`} />
-																{l.name}
-															</span>
-														))}
-													</div>
-												)}
-											</div>
-										);
-									})}
-								</div>
-							</div>
-						)}
-
-						<!-- Completed tasks -->
-						{doneTasks.length > 0 && (
-							<div>
-								<p class="mb-2 text-[11px] font-semibold uppercase tracking-wider text-emerald-400/60">Completed</p>
-								<div class="flex flex-col gap-1.5">
-									{doneTasks.map((task) => (
-										<div class="flex items-start gap-2.5 rounded-xl border border-emerald-400/12 bg-emerald-400/4 px-3 py-2.5">
-											<span class="mt-0.5 shrink-0 text-[11px] text-emerald-400/60">✓</span>
-											<p class="text-sm text-white/65 leading-snug">{task.title}</p>
-										</div>
-									))}
-								</div>
-							</div>
-						)}
-
-						{groupTotal === 0 && (
-							<p class="text-xs text-white/25 italic">Planning in progress</p>
-						)}
 					</div>
-				);
-			})}
-		</div>
+				)}
+
+				{todoItems.length > 0 && (
+					<div class="mb-5">
+						<p class="mb-2 text-[11px] font-semibold uppercase tracking-wider text-white/45">{tx('up_next')}</p>
+						<div class="flex flex-col gap-1.5">
+							{todoItems.map((w) => (
+								<div class={`flex items-start gap-2.5 rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2.5 ${w.clientStatus === 'later' ? 'opacity-60' : ''}`}>
+									<span class="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-white/30" />
+									<p class="flex-1 text-sm text-white/70 leading-snug">{w.text}</p>
+									<span class="shrink-0 text-[11px] tabular-nums text-white/30">{w.hours}h</span>
+								</div>
+							))}
+						</div>
+					</div>
+				)}
+
+				{doneItems.length > 0 && (
+					<div>
+						<p class="mb-2 text-[11px] font-semibold uppercase tracking-wider text-emerald-400/70">{tx('completed')}</p>
+						<div class="flex flex-col gap-1.5">
+							{doneItems.map((w) => (
+								<div class="flex items-start gap-2.5 rounded-xl border border-emerald-400/15 bg-emerald-400/[0.04] px-3 py-2.5">
+									<span class="mt-0.5 shrink-0 text-[11px] text-emerald-400/70">✓</span>
+									<p class="flex-1 text-sm text-white/65 leading-snug">{w.text}</p>
+									<span class="shrink-0 text-[11px] tabular-nums text-white/30">{w.hours}h</span>
+								</div>
+							))}
+						</div>
+					</div>
+				)}
+			</div>
+		)}
 
 	</>
 )}
 
 </div>
+
+<script>
+	// ── Note popover: delegated click + portal-style positioning ─────────────
+	function positionPopover(popover: HTMLElement, trigger: HTMLElement) {
+		const tRect = trigger.getBoundingClientRect();
+		const margin = 12;
+		// offsetWidth/Height are valid because the popover is already in the DOM
+		// (we set hidden=false before calling this).
+		const pWidth = popover.offsetWidth || 360;
+		const pHeight = popover.offsetHeight || 200;
+
+		// Anchor to the right of the dot.
+		let left = tRect.right + 10;
+		if (left + pWidth > window.innerWidth - margin) {
+			left = window.innerWidth - pWidth - margin;
+		}
+		if (left < margin) left = margin;
+
+		// Vertically center on the dot, clamped to viewport.
+		let top = tRect.top + tRect.height / 2 - pHeight / 2;
+		if (top < margin) top = margin;
+		if (top + pHeight > window.innerHeight - margin) {
+			top = window.innerHeight - pHeight - margin;
+		}
+
+		popover.style.left = `${left}px`;
+		popover.style.top = `${top}px`;
+	}
+
+	let openPopoverEl: HTMLElement | null = null;
+	let openTriggerEl: HTMLElement | null = null;
+
+	function closeNotePopover() {
+		if (openPopoverEl) {
+			openPopoverEl.setAttribute('hidden', '');
+			openPopoverEl.style.visibility = '';
+			openPopoverEl = null;
+			openTriggerEl = null;
+		}
+	}
+
+	function openNotePopover(trigger: HTMLElement) {
+		const targetId = trigger.dataset.target;
+		if (!targetId) return;
+		const popover = document.getElementById(targetId);
+		if (!popover) return;
+
+		// If clicking the same trigger again, close instead.
+		if (openPopoverEl === popover) {
+			closeNotePopover();
+			return;
+		}
+		closeNotePopover();
+
+		// Reveal but invisible to allow measurement, then position, then show.
+		popover.style.visibility = 'hidden';
+		popover.removeAttribute('hidden');
+		positionPopover(popover, trigger);
+		popover.style.visibility = 'visible';
+		openPopoverEl = popover;
+		openTriggerEl = trigger;
+
+		// Focus the textarea
+		popover.querySelector<HTMLTextAreaElement>('textarea[name="note"]')?.focus();
+	}
+
+	// Stub functions for backward-compat with bindInteractive
+	function positionNotePanelNow(_details: HTMLDetailsElement) {}
+	function positionNotePanel(_details: HTMLDetailsElement) {}
+
+	// ── Bind everything that lives inside <main>. Re-runs after a swap. ──────
+	function bindInteractive() {
+		// Use case structured editor: toggle, add/remove step
+		document.querySelectorAll<HTMLElement>('[data-section]').forEach((section) => {
+			if ((section as any).__bound) return;
+			(section as any).__bound = true;
+
+			section.querySelectorAll<HTMLButtonElement>('[data-edit-toggle]').forEach((btn) => {
+				btn.addEventListener('click', () => section.classList.toggle('editing'));
+			});
+
+			const list = section.querySelector<HTMLElement>('[data-step-list]');
+			const addBtn = section.querySelector<HTMLButtonElement>('[data-add-step]');
+			addBtn?.addEventListener('click', () => {
+				if (!list) return;
+				const idx = list.querySelectorAll('.step-row').length + 1;
+				const row = document.createElement('div');
+				row.className = 'step-row flex items-center gap-2';
+				row.innerHTML = `<span class="usecase-num shrink-0">${idx}</span><input type="text" name="step" class="field text-xs flex-1" placeholder="…"/><button type="button" class="step-remove text-white/30 hover:text-red-400 text-base leading-none w-6 h-6 flex items-center justify-center" aria-label="Remove">×</button>`;
+				list.appendChild(row);
+				row.querySelector<HTMLInputElement>('input')?.focus();
+			});
+
+			list?.addEventListener('click', (e) => {
+				const target = e.target as HTMLElement;
+				if (target.classList.contains('step-remove')) {
+					target.closest('.step-row')?.remove();
+					list.querySelectorAll<HTMLElement>('.step-row .usecase-num').forEach((n, i) => { n.textContent = String(i + 1); });
+				}
+			});
+		});
+
+		// Note popovers use delegated click handlers (set up below) — no per-element binding.
+	}
+
+	// ── Optimistic UI: instantly flip the row + button state on click ─────────
+	function applyOptimisticStatus(form: HTMLFormElement) {
+		const fd = new FormData(form);
+		const action = fd.get('_action');
+		if (action !== 'set-item-status') return;
+		const itemId = fd.get('item_id')?.toString() ?? '';
+		const newStatus = fd.get('status')?.toString() ?? '';
+		const row = document.querySelector<HTMLElement>(`[data-item-row][data-item-id="${itemId}"]`);
+		if (!row) return;
+
+		const currentStatus = row.dataset.rowStatus || '';
+		// Server toggles off when same value sent — mirror that here.
+		const finalStatus = (newStatus === currentStatus) ? '' : newStatus;
+		row.dataset.rowStatus = finalStatus;
+
+		// Update sibling pills
+		row.querySelectorAll<HTMLElement>('[data-pill]').forEach((pill) => {
+			pill.dataset.active = pill.dataset.pill === finalStatus ? 'true' : 'false';
+		});
+	}
+
+	// ── Form enhancement: POST via fetch + swap <main> instead of full reload ─
+	async function enhanceSubmit(form: HTMLFormElement) {
+		try {
+			const fd = new FormData(form);
+			const scrollY = window.scrollY;
+			const res = await fetch(window.location.pathname, { method: 'POST', body: fd });
+			const html = await res.text();
+			const parser = new DOMParser();
+			const doc = parser.parseFromString(html, 'text/html');
+			const newMain = doc.querySelector('main');
+			const curMain = document.querySelector('main');
+			if (newMain && curMain) {
+				curMain.replaceWith(newMain);
+				bindInteractive();
+				window.scrollTo({ top: scrollY, behavior: 'instant' as ScrollBehavior });
+			}
+		} catch (err) {
+			console.error('enhanceSubmit failed', err);
+		}
+	}
+
+	// Delegated submit handler — works for forms inside swapped DOM too.
+	document.addEventListener('submit', (e) => {
+		const form = e.target as HTMLFormElement;
+		if (!(form instanceof HTMLFormElement)) return;
+		if (form.method.toLowerCase() !== 'post') return;
+		if (!form.closest('main')) return;
+		e.preventDefault();
+
+		// 1. Apply the visual change immediately so the click feels instant.
+		applyOptimisticStatus(form);
+
+		// 2. Fire the request in the background. The eventual swap catches any
+		//    cascading effects (linked items, scope totals) without blocking the UI.
+		void enhanceSubmit(form);
+	});
+
+	// ── Note popover: delegated handlers (survive DOM swaps) ──────────────────
+	document.addEventListener('click', (e) => {
+		const target = e.target as HTMLElement;
+
+		// Click on a note dot trigger → open
+		const trigger = target.closest<HTMLElement>('[data-note-trigger]');
+		if (trigger) {
+			e.stopPropagation();
+			openNotePopover(trigger);
+			return;
+		}
+
+		// Cancel button inside the popover
+		if (target.closest('[data-note-cancel]')) {
+			closeNotePopover();
+			return;
+		}
+
+		// Click outside any open popover → close
+		if (openPopoverEl && !openPopoverEl.contains(target)) {
+			closeNotePopover();
+		}
+	});
+
+	document.addEventListener('keydown', (e) => {
+		if (e.key === 'Escape') closeNotePopover();
+	});
+
+	function repositionOpen() {
+		if (openPopoverEl && openTriggerEl) positionPopover(openPopoverEl, openTriggerEl);
+	}
+	window.addEventListener('resize', repositionOpen);
+	window.addEventListener('scroll', repositionOpen, { passive: true });
+
+	bindInteractive();
+</script>
 </Base>
