@@ -37,7 +37,7 @@ if (Astro.request.method === 'POST') {
 	return Astro.redirect('/freelance/admin');
 }
 
-const [{ data: projects, error: projectsError }, { data: requests }] = await Promise.all([
+const [{ data: projects }, { data: requests }] = await Promise.all([
 	supabase
 		.from('projects')
 		.select('*')
@@ -50,14 +50,6 @@ const [{ data: projects, error: projectsError }, { data: requests }] = await Pro
 
 const unread = (requests ?? []).filter((r) => !r.read).length;
 const siteUrl = Astro.site ?? new URL(Astro.url.origin);
-
-// ── Temporary diagnostic — remove after confirming env on live ──
-const dbHost = (() => {
-	try { return new URL(import.meta.env.SUPABASE_URL ?? '').host; } catch { return 'unset'; }
-})();
-const dbCount = (projects ?? []).length;
-const anonKeyPreview = ((import.meta.env.SUPABASE_ANON_KEY ?? '') as string).slice(0, 8) + '…';
-const dbError = projectsError ? `${projectsError.code ?? '?'}: ${projectsError.message ?? 'unknown'}` : '';
 
 function timeAgo(iso: string): string {
 	const diff = Date.now() - new Date(iso).getTime();
@@ -73,14 +65,6 @@ function timeAgo(iso: string): string {
 
 <Base title="Freelance Admin · Daniel Smidstrup" description="Admin dashboard">
 <div class="mx-auto max-w-3xl px-4 py-12">
-
-	<!-- TEMP DEBUG: shows which Supabase host this build is hitting + how many projects came back -->
-	<div class="mb-4 rounded-lg border border-amber-300/30 bg-amber-300/10 px-3 py-2 text-[11px] text-amber-300/85 font-mono break-all">
-		<div>db host: <span class="text-amber-300">{dbHost}</span></div>
-		<div>anon key: <span class="text-amber-300">{anonKeyPreview}</span></div>
-		<div>projects returned: <span class="text-amber-300">{dbCount}</span></div>
-		{dbError && <div>error: <span class="text-red-400">{dbError}</span></div>}
-	</div>
 
 	<!-- Header -->
 	<div class="mb-8 flex items-center justify-between">
