@@ -1,15 +1,18 @@
 ---
 import Base from '../../layouts/Base.astro';
 import { supabase } from '../../lib/supabase';
+import { isAdmin } from '../../lib/auth';
 
-// Auto-redirect returning clients
-const existingCookie = Astro.request.headers.get('cookie') ?? '';
-const fkey = Object.fromEntries(
-	existingCookie.split(';').map((c) => c.trim().split('=').map(decodeURIComponent))
-)['fkey'];
-if (fkey) {
-	const { data } = await supabase.from('projects').select('share_key').eq('share_key', fkey).single();
-	if (data) return Astro.redirect(`/freelance/view/${fkey}`);
+// Auto-redirect returning clients (skip for admins so they see the landing page)
+if (!isAdmin(Astro.request)) {
+	const existingCookie = Astro.request.headers.get('cookie') ?? '';
+	const fkey = Object.fromEntries(
+		existingCookie.split(';').map((c) => c.trim().split('=').map(decodeURIComponent))
+	)['fkey'];
+	if (fkey) {
+		const { data } = await supabase.from('projects').select('share_key').eq('share_key', fkey).single();
+		if (data) return Astro.redirect(`/freelance/view/${fkey}`);
+	}
 }
 
 let keyError     = false;
