@@ -50,21 +50,126 @@ if (Astro.request.method === 'POST') {
 		keyError = true;
 	}
 }
+
+const siteUrl = Astro.site ?? new URL(Astro.url.origin);
+
+const serviceSchema = {
+	'@context': 'https://schema.org',
+	'@type': 'Service',
+	name: 'Freelance Software Engineering & Fractional CTO',
+	provider: {
+		'@type': 'Person',
+		name: 'Daniel Smidstrup',
+		url: new URL('/', siteUrl).toString(),
+		jobTitle: 'Fractional CTO & Freelance Engineer',
+	},
+	serviceType: ['Fractional CTO', 'Freelance Software Engineering', 'AI Integration', 'Technical Leadership'],
+	areaServed: { '@type': 'Place', name: 'Worldwide (remote)' },
+	url: new URL('/freelance', siteUrl).toString(),
+	description: 'Fractional CTO services and freelance software engineering — AI integration, full-stack development, and technical leadership for startups.',
+};
+
+const services = [
+	{
+		title: 'Fractional CTO',
+		desc: 'Technical leadership without the full-time overhead. Architecture decisions, team structure, and engineering culture.',
+	},
+	{
+		title: 'AI integration',
+		desc: 'Ship AI features that actually work. From LLM workflows to production-grade pipelines.',
+	},
+	{
+		title: 'Full-stack development',
+		desc: 'End-to-end product engineering. TypeScript, React, Node, Python — whatever the problem needs.',
+	},
+	{
+		title: 'Technical strategy',
+		desc: 'Cut through complexity. Define the stack, scope the MVP, and build a system that scales.',
+	},
+];
 ---
 
 <Base
 	title="Freelance & Fractional CTO · Daniel Smidstrup"
-	description="Daniel Smidstrup is available as a Fractional CTO and for selected freelance engagements · AI integration, full-stack development, and technical leadership."
+	description="Daniel Smidstrup — Fractional CTO and freelance software engineer. AI integration, full-stack development, and technical leadership for startups."
 >
-<div class="flex min-h-screen flex-col items-center justify-center px-4 py-16">
-	<div class="relative w-full max-w-[360px]" style="display:flex;flex-direction:column;gap:12px;">
+<script type="application/ld+json" set:html={JSON.stringify(serviceSchema)} />
 
-		<a href="/" class="text-[13px] text-white/40 hover:text-white/70 transition" style="margin-bottom:4px;">← Daniel Smidstrup</a>
+<div class="flex min-h-screen flex-col items-center px-4 py-20">
+	<div class="w-full max-w-[560px]" style="display:flex;flex-direction:column;gap:40px;">
 
-		<!-- ① Client access · top block -->
-		<div class="card" style="padding:20px 24px;">
-			<p class="fl-label">Existing client</p>
-			<form method="POST" style="display:flex;gap:8px;margin-top:10px;">
+		<!-- Back link -->
+		<a href="/" class="text-[13px] text-white/40 hover:text-white/70 transition" style="margin-bottom:-24px;">← Daniel Smidstrup</a>
+
+		<!-- Hero -->
+		<header style="display:flex;flex-direction:column;gap:12px;">
+			<h1 style="font-size:32px;font-weight:700;letter-spacing:-0.03em;line-height:1.15;color:var(--text-1);margin:0;">
+				Fractional CTO &<br />Freelance Engineer
+			</h1>
+			<p style="font-size:16px;line-height:1.65;color:var(--text-2);margin:0;max-width:460px;">
+				I help startups ship better software, faster. Whether you need hands-on engineering, AI integration, or someone to own technical direction — I plug in where it matters most.
+			</p>
+		</header>
+
+		<!-- Services -->
+		<section class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+			{services.map((s) => (
+				<div class="card" style="padding:20px;">
+					<h2 style="font-size:14px;font-weight:600;color:var(--text-1);margin:0;letter-spacing:-0.01em;">{s.title}</h2>
+					<p style="font-size:13px;line-height:1.55;color:var(--text-2);margin:8px 0 0;">{s.desc}</p>
+				</div>
+			))}
+		</section>
+
+		<!-- About snippet -->
+		<section style="display:flex;align-items:flex-start;gap:16px;">
+			<img
+				src="/headshot.png"
+				alt="Daniel Smidstrup"
+				width="56"
+				height="56"
+				style="border-radius:50%;flex-shrink:0;border:1px solid var(--border);"
+			/>
+			<div>
+				<p style="font-size:14px;font-weight:500;color:var(--text-1);margin:0;">Daniel Smidstrup</p>
+				<p style="font-size:13px;line-height:1.6;color:var(--text-2);margin:4px 0 0;">
+					Co-founder & CTO at <a href="https://userlink.ai/" target="_blank" rel="noopener noreferrer" style="color:var(--text-1);text-decoration:underline;text-decoration-color:var(--border);">Userlink</a>.
+					Maker of <a href="https://seolint.dev/" target="_blank" rel="noopener noreferrer" style="color:var(--text-1);text-decoration:underline;text-decoration-color:var(--border);">SEOlint.dev</a>.
+					I like building software that feels sharp — simple architecture, strong UX, and fast feedback loops.
+				</p>
+			</div>
+		</section>
+
+		<!-- Contact form -->
+		<section>
+			<div class="card" style="padding:24px;">
+				<h2 style="font-size:18px;font-weight:600;color:var(--text-1);margin:0;letter-spacing:-0.02em;">Get in touch</h2>
+				<p style="font-size:13px;color:var(--text-2);margin:6px 0 0;">Tell me what you're working on. I'll get back to you within a day.</p>
+
+				{contactSent ? (
+					<div style="margin-top:20px;">
+						<p style="font-size:14px;font-weight:500;color:#34d399;">Message sent — I'll be in touch soon.</p>
+						<a href="/freelance" class="fl-link" style="display:inline-block;margin-top:10px;">Send another →</a>
+					</div>
+				) : (
+					<form method="POST" style="display:flex;flex-direction:column;gap:10px;margin-top:20px;">
+						<input type="hidden" name="_action" value="contact" />
+						<div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+							<input name="name" placeholder="Name" required class="field" />
+							<input name="email" type="email" placeholder="Email" required class="field" />
+						</div>
+						<textarea name="message" placeholder="What are you working on?" rows="3" class="field"></textarea>
+						{contactError && <p style="font-size:12px;color:#f87171;">Something went wrong — try again.</p>}
+						<button type="submit" class="btn-primary" style="margin-top:4px;">Send message</button>
+					</form>
+				)}
+			</div>
+		</section>
+
+		<!-- Existing client access (subtle) -->
+		<section style="display:flex;flex-direction:column;gap:8px;">
+			<p class="fl-label">Existing client?</p>
+			<form method="POST" style="display:flex;gap:8px;">
 				<input type="hidden" name="_action" value="project-key" />
 				<input
 					name="key"
@@ -78,32 +183,14 @@ if (Astro.request.method === 'POST') {
 				/>
 				<button type="submit" class="btn-secondary">Open →</button>
 			</form>
-			{keyError && <p style="margin-top:8px;font-size:13px;color:#f87171;">Key not found · check with Daniel.</p>}
-		</div>
+			{keyError && <p style="margin-top:4px;font-size:13px;color:#f87171;">Key not found — check with Daniel.</p>}
+		</section>
 
-		<!-- ② Contact form · main block -->
-		<div class="card" style="padding:24px;">
-			<h1 class="fl-heading">Fractional CTO &amp; Freelance</h1>
-			<p class="fl-sub">Technical leadership and hands-on engineering for startups.</p>
-
-			{contactSent ? (
-				<div style="margin-top:20px;">
-					<p style="font-size:14px;font-weight:500;color:#34d399;">Message sent · I'll be in touch soon.</p>
-					<a href="/freelance" class="fl-link" style="display:inline-block;margin-top:10px;">Send another →</a>
-				</div>
-			) : (
-				<form method="POST" style="display:flex;flex-direction:column;gap:10px;margin-top:20px;">
-					<input type="hidden" name="_action" value="contact" />
-					<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-						<input name="name" placeholder="Name" required class="field" />
-						<input name="email" type="email" placeholder="Email" required class="field" />
-					</div>
-					<textarea name="message" placeholder="What are you working on?" rows="3" class="field"></textarea>
-					{contactError && <p style="font-size:12px;color:#f87171;">Something went wrong · try again.</p>}
-					<button type="submit" class="btn-primary" style="margin-top:4px;">Send message</button>
-				</form>
-			)}
-		</div>
+		<!-- Footer links -->
+		<footer style="display:flex;gap:16px;padding-top:8px;border-top:1px solid var(--divider);">
+			<a href="mailto:daniel@danielsmidstrup.com" style="font-size:13px;color:var(--text-3);text-decoration:none;transition:color 150ms;" class="hover:text-white/70">daniel@danielsmidstrup.com</a>
+			<a href="https://www.linkedin.com/in/daniel-smidstrup-b98390226/" target="_blank" rel="noopener noreferrer" style="font-size:13px;color:var(--text-3);text-decoration:none;transition:color 150ms;" class="hover:text-white/70">LinkedIn</a>
+		</footer>
 
 	</div>
 </div>
